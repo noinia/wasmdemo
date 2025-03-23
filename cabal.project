@@ -1,0 +1,10 @@
+packages:
+  .
+
+source-repository-package
+  type: git
+  location: https://github.com/noinia/hexpat
+  tag: 1df3fd784381d9d6d5b2ef29031afafd94c0209a
+
+package hexpat
+  flags: +bundle
