@@ -1,11 +1,18 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Main where
 
+import           Attributes
 import           Data.Coerce
+import           Data.Map (Map)
+import qualified Data.Map as Map
+import           Data.Sequence (Seq)
+import qualified Data.Sequence as Seq
 import           Data.String (IsString(..))
 import           Data.Text (Text)
 import qualified Data.Text as Text
 import           GHC.Wasm.Prim
+import           HtmlEvent
+
 
 --------------------------------------------------------------------------------
 
@@ -191,13 +198,52 @@ onLoad act = do window <- jsWindow
 onClick act = do document <- jsDocument
                  addEventListener document "click" (EventListener $ const act)
 
+--------------------------------------------------------------------------------
+
+newtype AttributeName = AttributeName Text
+  deriving stock (Show,Eq,Ord)
+  deriving newtype (IsString)
+
+-- newtype AttributeValue = AttributeValue Text
+--   deriving stock (Show,Eq,Ord)
+--   deriving newtype (IsString)
+
+
+-- newtype AttrKey = AttrKey Text
+--   deriving stock (Show,Eq,Ord)
+--   deriving newtype (IsString)
+
+type Attributes = DMap AttributeValue
+
+
+data Html msg = TextNode !Text
+              | HtmlNode !HtmlElement
+                         (Map EventAttr msg)
+                         (Map AttributeName Text)
+                         (Seq (Html msg))
+              deriving (Show,Eq)
+
+
+
+
+-- htmlElem :: ElementName -> [Attr msg]
+
+
+
+
+
+--------------------------------------------------------------------------------
+
 main :: IO ()
 main = do consoleLog "woei"
-          onLoad $ do
-            consoleLog "loaded"
-            body   <- jsBody
-            textNode <- createTextNode "my text on load"
-            appendChild body textNode
+          body   <- jsBody
+          textNode <- createTextNode "my text on load"
+          appendChild body textNode
+          -- onLoad $ do
+          --   consoleLog "loaded"
+          --   body   <- jsBody
+          --   textNode <- createTextNode "my text on load"
+          --   appendChild body textNode
 
           onClick $ do
             consoleLog "clicked"

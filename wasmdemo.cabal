@@ -21,10 +21,32 @@ common warnings
       , hexpat           >= 0.20.13  && < 0.21
       , bytestring       >= 0.12     && < 0.13
       , text             >= 2.1      && < 2.2
-      , ghc-experimental
+      , effectful        >= 2.5.1    && < 2.6
+      , containers       >= 0.7      && < 0.9
+      , dependent-map    >= 0.4      && < 0.5
+      , some             >= 1.0.1    && < 1.1
+      , ghc-experimental >= 0.1
+
          -- >= 9.1201   && < 9.14
 
     default-language: GHC2024
+    default-extensions:
+        DataKinds
+      , TypeFamilies
+      , GADTs
+      , KindSignatures
+      , ScopedTypeVariables
+      , DerivingStrategies
+      , DerivingVia
+      , GeneralizedNewtypeDeriving
+      , DeriveGeneric
+      , DeriveFunctor
+      , PatternSynonyms
+      , TupleSections
+      , LambdaCase
+      , ViewPatterns
+      , FunctionalDependencies
+      , PartialTypeSignatures
 
 executable wasmdemo
     import:           warnings
@@ -39,7 +61,10 @@ executable wasmdemo-web
     main-is:          Web.hs
     ghc-options: -no-hs-main -optl-mexec-model=reactor -optl-Wl,--export=hs_start
 
-    -- other-modules:
+    other-modules:
+        Attributes
+        HtmlElement
+        HtmlEvent
     -- other-extensions:
 
     hs-source-dirs:   app
