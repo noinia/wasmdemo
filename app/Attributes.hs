@@ -6,9 +6,7 @@ module Attributes
   , AttrF
   , HtmlAttr
   , attrsFromList
-
-  , DSum, (==>)
-  , Identity(..)
+  , DSum
   ) where
 
 

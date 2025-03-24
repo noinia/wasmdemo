@@ -3,7 +3,10 @@ module Main where
 
 import           Attributes
 import           Data.Coerce
+import qualified Data.Dependent.Sum as DSum
 import           Data.Foldable
+import           Data.Functor.Identity (Identity(..))
+import           Data.Kind (Type)
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Sequence (Seq)
@@ -18,7 +21,6 @@ import           GHC.Wasm.Prim
 import           HtmlElement
 import           HtmlEvent
 import           Prelude hiding (div)
-
 
 --------------------------------------------------------------------------------
 
@@ -271,38 +273,37 @@ createHtml parent = \case
 textNode :: Text -> Html msg
 textNode = TextNode
 
--- | Helper to construct event handles
-data evt :-> msg = evt :-> msg deriving (Show,Eq)
+
+data Attr (el :: HtmlElement) (msg :: Type) = !EventAttr                      :-> msg
+                                            | forall a. !(HtmlAttribute el a) :=> a
+
+infixr 1 :=>, :->
 
 
+htmlElement            :: forall el msg.
+                          HtmlElement
+                       -> [Attr el msg]
+                       -> [Html msg]
+                       -> Html msg
+htmlElement el ats chs = HtmlNode el (Map.fromList  [(k,v) | k :-> v <- ats])
+                                     (attrsFromList [k DSum.:=> Identity v | k :=> v <- ats])
+                                     (Seq.fromList chs)
 
-htmlElement                   :: forall el msg.
-                                 HtmlElement
-                              -> [EventAttr :-> msg]
-                              -> [HtmlAttr el]
-                              -> [Html msg]
-                              -> Html msg
-htmlElement el evts attrs chs = HtmlNode el (Map.fromList [(k,v) | k :-> v <- evts])
-                                            (attrsFromList attrs)
-                                            (Seq.fromList chs)
-
-
-div :: [EventAttr :-> msg] -> [HtmlAttr Div] -> [Html msg] -> Html msg
+div :: [Attr Div msg] -> [Html msg] -> Html msg
 div = htmlElement @Div Div
 
-p :: [EventAttr :-> msg] -> [HtmlAttr P] -> [Html msg] -> Html msg
+p :: [Attr P msg] -> [Html msg] -> Html msg
 p = htmlElement @P P
 
-h1 :: [EventAttr :-> msg] -> [HtmlAttr H1] -> [Html msg] -> Html msg
+h1 :: [Attr H1 msg] -> [Html msg] -> Html msg
 h1 = htmlElement @H1 H1
 
 --------------------------------------------------------------------------------
 
 myUI :: Html msg
 myUI = div []
-           []
-           [ h1  [] [] [textNode "header!"]
-           , div [] [] [p [] [] [textNode "woei"]]
+           [ h1  [] [textNode "header!"]
+           , div [] [p [] [textNode "woei"]]
            ]
 
 
