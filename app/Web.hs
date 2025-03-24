@@ -3,6 +3,7 @@ module Main where
 
 import           Attributes
 import           Data.Coerce
+import           Data.Foldable
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Sequence (Seq)
@@ -10,8 +11,13 @@ import qualified Data.Sequence as Seq
 import           Data.String (IsString(..))
 import           Data.Text (Text)
 import qualified Data.Text as Text
+import           Data.Traversable
+import           Effectful
+import           Effectful.Dispatch.Static
 import           GHC.Wasm.Prim
+import           HtmlElement
 import           HtmlEvent
+import           Prelude hiding (div)
 
 
 --------------------------------------------------------------------------------
@@ -81,10 +87,6 @@ textToJSString = toJSString . Text.unpack
 
 --------------------------------------------------------------------------------
 
-newtype ElementName = ElementName Text
-  deriving stock (Show,Eq,Ord)
-  deriving newtype (IsString)
-
 newtype EventType = EventType Text
   deriving stock (Show,Eq,Ord)
   deriving newtype (IsString)
@@ -138,65 +140,89 @@ instance IsNode Element where
 
 --------------------------------------------------------------------------------
 
-jsDocument :: IO Document
-jsDocument = js_document
+data DOM  :: Effect
+type instance DispatchOf DOM  = Static WithSideEffects
+newtype instance StaticRep DOM = MkDOM ()
 
-jsBody :: IO Body
-jsBody = js_body
+--
+evalDOM :: IOE :> es => Eff (DOM : es) a -> Eff es a
+evalDOM = evalStaticRep (MkDOM ())
 
-jsWindow :: IO Window
-jsWindow = js_window
+data JSIO :: Effect
+type instance DispatchOf JSIO = Static WithSideEffects
+newtype instance StaticRep JSIO = MkJSIO ()
 
-createTextNode :: Text -> IO Node
-createTextNode = js_createTextNode . textToJSString
-
-createElement                        :: ElementName -> IO Element
-createElement (ElementName elemName) = js_createElement (textToJSString elemName)
-
-
-appendChild              :: (IsNode parent, IsNode child)
-                         => parent -> child  -> IO ()
-appendChild parent child = js_appendChild (asNode parent) (asNode child)
+evalJSIO :: IOE :> es => Eff (JSIO : es) a -> Eff es a
+evalJSIO = evalStaticRep (MkJSIO ())
 
 
-removeChild              :: (IsNode parent, IsNode child)
-                         => parent -> child  -> IO ()
-removeChild parent child = js_removeChild (asNode parent) (asNode child)
+type ES = [DOM,JSIO,IOE]
+evalInIO :: Eff ES a -> IO a
+evalInIO = runEff . evalJSIO . evalDOM
+
+--------------------------------------------------------------------------------
+
+jsDocument :: DOM :> es => Eff es Document
+jsDocument = unsafeEff_ js_document
+
+jsBody :: DOM :> es => Eff es Body
+jsBody = unsafeEff_ js_body
+
+jsWindow :: DOM :> es => Eff es Window
+jsWindow = unsafeEff_ js_window
+
+createTextNode :: DOM :> es => Text -> Eff es Node
+createTextNode = unsafeEff_ . js_createTextNode . textToJSString
+
+createElement                        :: DOM :> es => ElementName -> Eff es Element
+createElement (ElementName elemName) = unsafeEff_ $ js_createElement (textToJSString elemName)
+
+
+appendChild              :: (DOM :> es, IsNode parent, IsNode child)
+                         => parent -> child  -> Eff es ()
+appendChild parent child = unsafeEff_  $ js_appendChild (asNode parent) (asNode child)
+
+
+removeChild              :: (DOM :> es, IsNode parent, IsNode child)
+                         => parent -> child  -> Eff es ()
+removeChild parent child = unsafeEff_  $ js_removeChild (asNode parent) (asNode child)
 
 
 --------------------------------------------------------------------------------
 
-consoleLog :: Text -> IO ()
-consoleLog = js_log . textToJSString
+consoleLog :: JSIO :> es => Text -> Eff es ()
+consoleLog = unsafeEff_  . js_log . textToJSString
 
-addEventListener                    :: IsEventTarget eventTarget
+addEventListener                    :: (IsEventTarget eventTarget, DOM :> es)
                                     => eventTarget
                                     -> EventType
                                     -> EventListener ()
-                                    -> IO ()
+                                    -> Eff es ()
 addEventListener target
                  (EventType eventType)
-                 (EventListener listener) = do
+                 (EventListener listener) = unsafeEff_  $ do
   listener' <- js_mkEventHandler (coerce @_ @(JSVal -> IO ()) listener)
   js_addEventListener (asEventTarget target) (textToJSString eventType) listener'
 
-removeEventListener                 :: IsEventTarget eventTarget
+removeEventListener                 :: (IsEventTarget eventTarget, DOM :> es)
                                     => eventTarget
                                     -> EventType
                                     -> JSVal -- EventListener ()
-                                    -> IO ()
+                                    -> Eff es ()
 removeEventListener target
                     (EventType eventType)
-                    listener' =
+                    listener' = unsafeEff_ $
   js_remove_event_listener (asEventTarget target) (textToJSString eventType) listener'
 
 
-onLoad     :: IO () -> IO ()
+onLoad     :: DOM :> es => Eff ES () -> Eff es ()
 onLoad act = do window <- jsWindow
-                addEventListener window "load" (EventListener $ const act)
+                addEventListener window "load"
+                                 (EventListener . const $ evalInIO act)
 
+onClick    :: DOM :> es => Eff ES () -> Eff es ()
 onClick act = do document <- jsDocument
-                 addEventListener document "click" (EventListener $ const act)
+                 addEventListener document "click" (EventListener . const $ evalInIO act)
 
 --------------------------------------------------------------------------------
 
@@ -213,30 +239,82 @@ newtype AttributeName = AttributeName Text
 --   deriving stock (Show,Eq,Ord)
 --   deriving newtype (IsString)
 
-type Attributes = DMap AttributeValue
+-- type Attributes = DMap AttributeValue
+
+-- data HtmlIx = TextIx | NodeIx [HtmlIx]
 
 
-data Html msg = TextNode !Text
-              | HtmlNode !HtmlElement
-                         (Map EventAttr msg)
-                         (Map AttributeName Text)
-                         (Seq (Html msg))
-              deriving (Show,Eq)
+data Html msg where
+  TextNode :: !Text           -> Html msg
+  HtmlNode :: !HtmlElement
+           -> Map EventAttr msg
+           -> Attributes el -- this should match the htmlElemnt as well...
+           -> Seq (Html msg)
+                              -> Html msg
+
+           -- deriving (Show,Eq)
+
+createHtml        :: (DOM :> es, IsNode root)
+                  => root -> Html msg -> Eff es Element
+createHtml parent = \case
+  TextNode text              -> do txtRef <- createTextNode text
+                                   appendChild parent txtRef
+                                   pure $ coerce txtRef -- TODO
+  HtmlNode el evts attrs chs -> do elRef <- createElement (elementNameOf el)
+                                   appendChild parent elRef
+                                   -- set attrs
+                                   traverse_ (createHtml elRef) chs
+                                   pure elRef
+
+-- maybe we should actually annotate the entire tree instead ..
+
+textNode :: Text -> Html msg
+textNode = TextNode
+
+-- | Helper to construct event handles
+data evt :-> msg = evt :-> msg deriving (Show,Eq)
 
 
 
+htmlElement                   :: forall el msg.
+                                 HtmlElement
+                              -> [EventAttr :-> msg]
+                              -> [HtmlAttr el]
+                              -> [Html msg]
+                              -> Html msg
+htmlElement el evts attrs chs = HtmlNode el (Map.fromList [(k,v) | k :-> v <- evts])
+                                            (attrsFromList attrs)
+                                            (Seq.fromList chs)
 
--- htmlElem :: ElementName -> [Attr msg]
 
+div :: [EventAttr :-> msg] -> [HtmlAttr Div] -> [Html msg] -> Html msg
+div = htmlElement @Div Div
 
+p :: [EventAttr :-> msg] -> [HtmlAttr P] -> [Html msg] -> Html msg
+p = htmlElement @P P
 
+h1 :: [EventAttr :-> msg] -> [HtmlAttr H1] -> [Html msg] -> Html msg
+h1 = htmlElement @H1 H1
+
+--------------------------------------------------------------------------------
+
+myUI :: Html msg
+myUI = div []
+           []
+           [ h1  [] [] [textNode "header!"]
+           , div [] [] [p [] [] [textNode "woei"]]
+           ]
 
 
 --------------------------------------------------------------------------------
 
 main :: IO ()
-main = do consoleLog "woei"
+main = runEff . evalJSIO . evalDOM
+     $ do consoleLog "woei"
           body   <- jsBody
+
+          tr <- createHtml body myUI
+
           textNode <- createTextNode "my text on load"
           appendChild body textNode
           -- onLoad $ do

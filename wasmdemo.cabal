@@ -17,15 +17,17 @@ common warnings
     ghc-options: -Wall -lwasi-emulated-getpid
 
     build-depends:
-        base             >=4.20.0.0  && < 5
-      , hexpat           >= 0.20.13  && < 0.21
-      , bytestring       >= 0.12     && < 0.13
-      , text             >= 2.1      && < 2.2
-      , effectful        >= 2.5.1    && < 2.6
-      , containers       >= 0.7      && < 0.9
-      , dependent-map    >= 0.4      && < 0.5
-      , some             >= 1.0.1    && < 1.1
-      , ghc-experimental >= 0.1
+        base               >=4.20.0.0  && < 5
+      , hexpat             >= 0.20.13  && < 0.21
+      , bytestring         >= 0.12     && < 0.13
+      , text               >= 2.1      && < 2.2
+      , effectful          >= 2.5.1    && < 2.6
+      , containers         >= 0.7      && < 0.9
+      , dependent-map      >= 0.4      && < 0.5
+      , some               >= 1.0.6    && < 1.1
+      , constraints-extras >= 0.4.0.2  && < 0.5
+      , dependent-sum      >= 0.7.2.0  && < 0.8
+      , ghc-experimental   >= 0.1
 
          -- >= 9.1201   && < 9.14
 
@@ -47,6 +49,7 @@ common warnings
       , ViewPatterns
       , FunctionalDependencies
       , PartialTypeSignatures
+      , QuantifiedConstraints
 
 executable wasmdemo
     import:           warnings
