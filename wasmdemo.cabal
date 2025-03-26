@@ -68,6 +68,8 @@ executable wasmdemo-web
         Attributes
         HtmlElement
         HtmlEvent
+        FFI
+        FFI.Types
     -- other-extensions:
 
     hs-source-dirs:   app

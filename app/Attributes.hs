@@ -1,4 +1,5 @@
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Attributes
   ( HtmlAttribute(..)
   , Attributes(..)
@@ -6,7 +7,19 @@ module Attributes
   , AttrF
   , HtmlAttr
   , attrsFromList
+
+
+  , attrNameOf
+  , traverseAttributes_
+
+  , HasTextRender(..)
+
   , DSum
+
+  , Has'
+  , Identity(..)
+
+  , CssClass(..)
   ) where
 
 
@@ -34,7 +47,7 @@ data HtmlAttribute el a where
   Autocapitalize        ::         HtmlAttribute el Text
   Autocorrect           ::         HtmlAttribute el Text
   Autofocus             ::         HtmlAttribute el Text
-  Class                 ::         HtmlAttribute el Text
+  Class                 ::         HtmlAttribute el CssClass
   Contenteditable       ::         HtmlAttribute el Text
   XData                 :: Text -> HtmlAttribute el Text
   Dir                   ::         HtmlAttribute el Text
@@ -75,7 +88,9 @@ instance GEq   (HtmlAttribute el) where geq = defaultGeq
 instance GCompare  (HtmlAttribute el) where
   gcompare _ _ = GGT -- FIXME !!
 
-instance c Text => Has c (HtmlAttribute el) where
+instance ( c Text
+         , c CssClass
+         ) => Has c (HtmlAttribute el) where
   -- has forall (a :: k) r. f a -> (c a => r) -> r
   has a x = case a of
     Accesskey              -> x
@@ -112,6 +127,46 @@ instance c Text => Has c (HtmlAttribute el) where
     Translate              -> x
     Virtualkeyboardpolicy  -> x
     Writingsuggestions     -> x
+
+--------------------------------------------------------------------------------
+
+-- | Get the Name of a HtmlAttribute
+attrNameOf :: HtmlAttribute el a -> Text
+attrNameOf = \case
+  Accesskey             -> "accesskey"
+  Anchor                -> "anchor"
+  Autocapitalize        -> "autocapitalize"
+  Autocorrect           -> "autocorrect"
+  Autofocus             -> "autofocus"
+  Class                 -> "class"
+  Contenteditable       -> "contenteditable"
+  XData label           -> "data-" <> label
+  Dir                   -> "dir"
+  Draggable             -> "draggable"
+  Enterkeyhint          -> "enterkeyhint"
+  Exportparts           -> "exportparts"
+  Hidden                -> "hidden"
+  Id                    -> "id"
+  Inert                 -> "inert"
+  Inputmode             -> "inputmode"
+  Is                    -> "is"
+  Itemid                -> "itemid"
+  Itemprop              -> "itemprop"
+  Itemref               -> "itemref"
+  Itemscope             -> "itemscope"
+  Itemtype              -> "itemtype"
+  Lang                  -> "lang"
+  Nonce                 -> "nonce"
+  Part                  -> "part"
+  Popover               -> "popover"
+  Slot                  -> "slot"
+  Spellcheck            -> "spellcheck"
+  Style                 -> "style"
+  Tabindex              -> "tabindex"
+  Title                 -> "title"
+  Translate             -> "translate"
+  Virtualkeyboardpolicy -> "virtualkeyboardpolicy"
+  Writingsuggestions    -> "writingsuggestions"
 
 
 -- --------------------------------------------------------------------------------
@@ -170,12 +225,49 @@ attrsFromList :: [HtmlAttr el] -> Attributes el
 attrsFromList = Attributes . DMap.fromList
 
 
+class HasJSFFI a where
+instance HasJSFFI Int
+instance HasJSFFI Bool
+
+
+-- data JSSerialized a where
+--   AsBool :: JSSerialized Int
+
+
+-- class JSSerializable el a where
+--   serializeJS :: HtmlAttribute el a -> JSSerialized a
+
+
+
+class HasTextRender a where
+  renderAsText :: a -> Text
+
+instance HasTextRender a => HasTextRender (Identity a) where
+  renderAsText (Identity x) = renderAsText x
+instance HasTextRender Text where
+  renderAsText = id
+
+-- | Traversa over the attributes
+traverseAttributes_                  :: ( Applicative t
+                                        )
+                                     => (forall a. HtmlAttribute el a -> a -> t ())
+                                     -> Attributes el -> t ()
+traverseAttributes_ f (Attributes m) = DMap.traverseWithKey_ (\attr (Identity x) -> f attr x) m
+
+
 newtype HtmlId = HtmlId Text
   deriving stock (Show,Eq,Ord)
-  deriving newtype (IsString)
+  deriving newtype (IsString, HasTextRender)
 
 
 -- type family AttributeValue (attr :: AttributeKind) :: Type
 
 -- type instance AttributeValue (Global Id)    = HtmlId
 -- type instance AttributeValue (Global Title) = Text
+
+
+--------------------------------------------------------------------------------
+
+newtype CssClass = CssClass Text
+  deriving stock (Show,Eq,Ord)
+  deriving newtype (IsString, HasTextRender)

@@ -1,10 +1,15 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE AllowAmbiguousTypes #-}
 module Main where
 
 import           Attributes
+import           Data.Bifoldable
+import           Data.Bifunctor
+import           Data.Bitraversable
 import           Data.Coerce
 import qualified Data.Dependent.Sum as DSum
 import           Data.Foldable
+import qualified Data.Foldable as F
 import           Data.Functor.Identity (Identity(..))
 import           Data.Kind (Type)
 import           Data.Map (Map)
@@ -17,6 +22,8 @@ import qualified Data.Text as Text
 import           Data.Traversable
 import           Effectful
 import           Effectful.Dispatch.Static
+import           FFI
+import           FFI.Types
 import           GHC.Wasm.Prim
 import           HtmlElement
 import           HtmlEvent
@@ -30,115 +37,9 @@ foreign export javascript "hs_start"
   main :: IO ()
 
 
---------------------------------------------------------------------------------
-
-foreign import javascript unsafe "return document"
-  js_document :: IO Document
-
-foreign import javascript unsafe "return document.body"
-  js_body :: IO Body
-
-foreign import javascript unsafe "return window"
-  js_window :: IO Window
 
 --------------------------------------------------------------------------------
 
-foreign import javascript unsafe "console.log($1)"
-  js_log :: JSString -> IO ()
-
---------------------------------------------------------------------------------
-
-foreign import javascript unsafe "document.createTextNode($1)"
-  js_createTextNode :: JSString -> IO Node
-
-foreign import javascript unsafe "document.createElement($1)"
-  js_createElement :: JSString -> IO Element
-
-
-
-
-
-foreign import javascript unsafe "$1.appendChild($2)"
-  js_appendChild :: Node -> Node -> IO ()
-
-foreign import javascript unsafe "$1.insertBefore($2)"
-  js_insertBefore :: Node -> Node -> IO ()
-
-foreign import javascript unsafe "$1.removeChild($2)"
-  js_removeChild :: Node -> Node -> IO ()
-
---------------------------------------------------------------------------------
-
-foreign import javascript "wrapper sync"
-  js_mkEventHandler :: (JSVal -> IO ()) -> IO JSVal
-
-foreign import javascript unsafe "$1.addEventListener($2,$3)"
-  js_addEventListener :: EventTarget
-                      -> JSString
-                      -> JSVal
-                      -> IO ()
-
-foreign import javascript unsafe "$1.removeEventListener($2,$3)"
-  js_remove_event_listener :: EventTarget -> JSString -> JSVal -> IO ()
-
-
---------------------------------------------------------------------------------
-
-textToJSString :: Text -> JSString
-textToJSString = toJSString . Text.unpack
-
---------------------------------------------------------------------------------
-
-newtype EventType = EventType Text
-  deriving stock (Show,Eq,Ord)
-  deriving newtype (IsString)
-
-newtype EventTarget = EventTarget JSVal
---   deriving stock (Show,Eq,Ord)
---   deriving newtype (IsString)
-
-class IsEventTarget target where
-  asEventTarget :: target -> EventTarget
-
-
-instance IsEventTarget EventTarget where
-  asEventTarget = id
-
-instance IsEventTarget Window where
-  asEventTarget = coerce
-
-instance IsEventTarget Document where
-  asEventTarget = coerce
-
-
---------------------------------------------------------------------------------
-
-newtype Element = Element JSVal
-
-newtype Node = Node JSVal
-
-newtype Event = Event JSVal
-  -- deriving stock (Show,Eq,Ord)
-
-newtype EventListener a = EventListener (Event -> IO a)
-
-newtype Document = Document JSVal
-
-newtype Window = Window JSVal
-
-newtype Body = Body JSVal
-
-class IsNode node where
-  asNode :: node -> Node
-
-instance IsNode Node where
-  asNode = id
-
-instance IsNode Body where
-  asNode = coerce
-
-instance IsNode Element where
-  asNode = coerce
 
 --------------------------------------------------------------------------------
 
@@ -192,19 +93,37 @@ removeChild parent child = unsafeEff_  $ js_removeChild (asNode parent) (asNode 
 
 --------------------------------------------------------------------------------
 
+-- | pre: element is of type 'el'
+setAttribute               :: forall el a es element.
+                              (IsNode element, DOM :> es, HasTextRender a)
+                           => element -> HtmlAttribute el a -> a -> Eff es ()
+setAttribute el attr value = unsafeEff_ $
+    js_setAttributeString (asNode el) (textToJSString $ attrNameOf attr)
+                                      (textToJSString $ renderAsText value)
+
+-- | Removes an attribute
+removeAttribute         :: (IsNode element, DOM :> es)
+                        => element -> HtmlAttribute el a -> Eff es ()
+removeAttribute el attr = unsafeEff_ $
+    js_removeAttribute (asNode el) (textToJSString $ attrNameOf attr)
+
+--------------------------------------------------------------------------------
+
 consoleLog :: JSIO :> es => Text -> Eff es ()
 consoleLog = unsafeEff_  . js_log . textToJSString
 
 addEventListener                    :: (IsEventTarget eventTarget, DOM :> es)
                                     => eventTarget
-                                    -> EventType
+                                    -> EventAttr
                                     -> EventListener ()
                                     -> Eff es ()
 addEventListener target
-                 (EventType eventType)
+                 eventType
                  (EventListener listener) = unsafeEff_  $ do
   listener' <- js_mkEventHandler (coerce @_ @(JSVal -> IO ()) listener)
-  js_addEventListener (asEventTarget target) (textToJSString eventType) listener'
+  js_addEventListener (asEventTarget target)
+                      (textToJSString . coerce $ asEventType eventType)
+                      listener'
 
 removeEventListener                 :: (IsEventTarget eventTarget, DOM :> es)
                                     => eventTarget
@@ -217,20 +136,49 @@ removeEventListener target
   js_remove_event_listener (asEventTarget target) (textToJSString eventType) listener'
 
 
-onLoad     :: DOM :> es => Eff ES () -> Eff es ()
-onLoad act = do window <- jsWindow
-                addEventListener window "load"
-                                 (EventListener . const $ evalInIO act)
+-- onLoad     :: DOM :> es => Eff ES () -> Eff es ()
+-- onLoad act = do window <- jsWindow
+--                 addEventListener window OnLoad
+--                                  (EventListener . const $ evalInIO act)
 
-onClick    :: DOM :> es => Eff ES () -> Eff es ()
-onClick act = do document <- jsDocument
-                 addEventListener document "click" (EventListener . const $ evalInIO act)
+-- onClick    :: DOM :> es => Eff ES () -> Eff es ()
+-- onClick act = do document <- jsDocument
+--                  addEventListener document OnClick (EventListener . const $ evalInIO act)
 
 --------------------------------------------------------------------------------
 
-newtype AttributeName = AttributeName Text
-  deriving stock (Show,Eq,Ord)
-  deriving newtype (IsString)
+
+update :: model -> msg -> Eff es model
+update = undefined
+
+
+--------------------------------------------------------------------------------
+
+registerEventHandles                :: (IsEventTarget target, DOM :> es)
+                                    => (msg -> Event -> Eff ES ())
+                                    -> target
+                                    -> Map EventAttr msg -> Eff es ()
+registerEventHandles handler target = Map.foldMapWithKey $ \evt msg ->
+    addEventListener (asEventTarget target) evt (EventListener $ evalInIO . handler msg)
+
+--------------------------------------------------------------------------------
+
+data MyModel = MyModel Text
+  deriving (Show,Eq)
+
+data MyMsg = HasBeenClicked
+           | SetMsg Text
+
+
+
+myUpdate   :: (JSIO :> es) => MyModel -> MyMsg -> Eff es MyModel
+myUpdate m = \case
+    HasBeenClicked -> do consoleLog "hasbeen clicked :)"
+                         pure m
+    SetMsg t       -> do consoleLog "setting msg"
+                         pure $ MyModel t
+
+--------------------------------------------------------------------------------
 
 -- newtype AttributeValue = AttributeValue Text
 --   deriving stock (Show,Eq,Ord)
@@ -246,64 +194,131 @@ newtype AttributeName = AttributeName Text
 -- data HtmlIx = TextIx | NodeIx [HtmlIx]
 
 
-data Html msg where
-  TextNode :: !Text           -> Html msg
+data Html a msg where
+  TextNode :: !Text           -> a -> Html a msg
   HtmlNode :: !HtmlElement
+           -> a
            -> Map EventAttr msg
            -> Attributes el -- this should match the htmlElemnt as well...
-           -> Seq (Html msg)
-                              -> Html msg
+           -> Seq (Html a msg)
+                              -> Html a msg
+
+deriving instance Functor     (Html a)
+deriving instance Foldable    (Html a)
+deriving instance Traversable (Html a)
+
+instance Bifunctor Html where
+  bimap f g = go
+    where
+      go = \case
+        TextNode text x              -> TextNode text (f x)
+        HtmlNode el x evts attrs chs -> HtmlNode el   (f x) (g <$> evts) attrs (go <$> chs)
+
+instance Bifoldable Html where
+  bifoldMap f g = go
+    where
+      go = \case
+        TextNode text x              -> f x
+        HtmlNode el x evts attrs chs -> f x <> foldMap g evts <> foldMap go chs
+
+instance Bitraversable Html where
+  bitraverse f g = go
+    where
+      go = \case
+        TextNode text x              -> TextNode text <$> f x
+        HtmlNode el x evts attrs chs -> (\x' evts' chs' -> HtmlNode el x' evts' attrs chs')
+                                    <$> f x
+                                    <*> traverse g evts
+                                    <*> traverse go chs
+
+
+
 
            -- deriving (Show,Eq)
 
-createHtml        :: (DOM :> es, IsNode root)
-                  => root -> Html msg -> Eff es Element
+createHtml        :: ( DOM :> es, IsNode root
+                     -- , Has' HasTextRender (HtmlAttribute el) Identity
+                     , msg ~ MyMsg
+                     )
+                  => root -> Html a msg -> Eff es (Html Element msg)
 createHtml parent = \case
-  TextNode text              -> do txtRef <- createTextNode text
-                                   appendChild parent txtRef
-                                   pure $ coerce txtRef -- TODO
-  HtmlNode el evts attrs chs -> do elRef <- createElement (elementNameOf el)
-                                   appendChild parent elRef
-                                   -- set attrs
-                                   traverse_ (createHtml elRef) chs
-                                   pure elRef
+    TextNode text _              -> do txtRef <- createTextNode text
+                                       appendChild parent txtRef
+                                       pure $ TextNode text (coerce txtRef) -- TODO
+    HtmlNode el _ evts attrs chs -> do elRef <- createElement (elementNameOf el)
+                                       appendChild parent elRef
+                                       -- set attrs
+                                       -- setAttribute elRef Id "foo"
+
+                                       -- traverseAttributes_ (setAttribute elRef) attrs
+                                       -- register event handles
+                                       registerEventHandles handler elRef evts
+
+                                       chs' <- traverse (createHtml elRef) chs
+                                       pure $ HtmlNode el elRef evts attrs chs'
+  where
+    handler         :: (msg ~ MyMsg) => msg -> Event -> Eff ES ()
+    handler msg evt = do consoleLog "should parse the evt"
+                         schedule msg
+
+
+schedule     :: (msg ~ MyMsg) => msg -> Eff ES ()
+schedule msg = do m' <- myUpdate (MyModel "dummy") msg
+                  consoleLog $ "result from update" <> showT m'
+
+showT :: Show a => a -> Text
+showT = Text.pack . show
+
 
 -- maybe we should actually annotate the entire tree instead ..
 
-textNode :: Text -> Html msg
-textNode = TextNode
+textNode   :: Text -> Html () msg
+textNode t = TextNode t mempty
 
 
-data Attr (el :: HtmlElement) (msg :: Type) = !EventAttr                      :-> msg
+data Attr (el :: HtmlElement) (msg :: Type) =           !EventAttr            :-> msg
                                             | forall a. !(HtmlAttribute el a) :=> a
 
 infixr 1 :=>, :->
 
 
-htmlElement            :: forall el msg.
-                          HtmlElement
+htmlElement            :: forall el msg. ()
+                       => HtmlElement
                        -> [Attr el msg]
-                       -> [Html msg]
-                       -> Html msg
-htmlElement el ats chs = HtmlNode el (Map.fromList  [(k,v) | k :-> v <- ats])
+                       -> [Html () msg]
+                       -> Html () msg
+htmlElement el ats chs = HtmlNode el mempty
+                                     (Map.fromList  [(k,v) | k :-> v <- ats])
                                      (attrsFromList [k DSum.:=> Identity v | k :=> v <- ats])
                                      (Seq.fromList chs)
 
-div :: [Attr Div msg] -> [Html msg] -> Html msg
+div :: [Attr Div msg] -> [Html () msg] -> Html () msg
 div = htmlElement @Div Div
 
-p :: [Attr P msg] -> [Html msg] -> Html msg
+p :: [Attr P msg] -> [Html () msg] -> Html () msg
 p = htmlElement @P P
 
-h1 :: [Attr H1 msg] -> [Html msg] -> Html msg
+h1 :: [Attr H1 msg] -> [Html () msg] -> Html () msg
 h1 = htmlElement @H1 H1
+
+
+-- | Renders classes
+classes :: Foldable f => f CssClass -> CssClass
+classes = CssClass . Text.unwords . map coerce . F.toList
 
 --------------------------------------------------------------------------------
 
-myUI :: Html msg
+myUI :: Html () MyMsg
 myUI = div []
-           [ h1  [] [textNode "header!"]
-           , div [] [p [] [textNode "woei"]]
+           [ h1  [ Class   :=> classes ["header", "someclass"]
+                 , OnClick :-> HasBeenClicked
+                 ]
+                 [ textNode "header!"
+                 ]
+           , div [] [p [ OnClick :-> SetMsg "woei"
+                       ]
+                       [textNode "woei"]
+                    ]
            ]
 
 
@@ -324,14 +339,14 @@ main = runEff . evalJSIO . evalDOM
           --   textNode <- createTextNode "my text on load"
           --   appendChild body textNode
 
-          onClick $ do
-            consoleLog "clicked"
-            body   <- jsBody
-            theDiv <- createElement "div"
+          -- onClick $ do
+          --   consoleLog "clicked"
+          --   body   <- jsBody
+          --   theDiv <- createElement "div"
 
-            appendChild body theDiv
+          --   appendChild body theDiv
 
-            textNode <- createTextNode "my text node :) "
-            appendChild body textNode
+          --   textNode <- createTextNode "my text node :) "
+          --   appendChild body textNode
 
           consoleLog "added"

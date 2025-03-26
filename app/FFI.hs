@@ -1,0 +1,81 @@
+module FFI where
+
+import           Data.Coerce
+import           Data.String (IsString(..))
+import           Data.Text (Text)
+import qualified Data.Text as Text
+import           FFI.Types
+import           GHC.Wasm.Prim
+
+--------------------------------------------------------------------------------
+
+foreign import javascript unsafe "return document"
+  js_document :: IO Document
+
+foreign import javascript unsafe "return document.body"
+  js_body :: IO Body
+
+foreign import javascript unsafe "return window"
+  js_window :: IO Window
+
+--------------------------------------------------------------------------------
+
+foreign import javascript unsafe "console.log($1)"
+  js_log :: JSString -> IO ()
+
+--------------------------------------------------------------------------------
+
+foreign import javascript unsafe "document.createTextNode($1)"
+  js_createTextNode :: JSString -> IO Node
+
+foreign import javascript unsafe "document.createElement($1)"
+  js_createElement :: JSString -> IO Element
+
+
+--------------------------------------------------------------------------------
+-- * Adding or Removing Elements
+
+foreign import javascript unsafe "$1.appendChild($2)"
+  js_appendChild :: Node -> Node -> IO ()
+
+foreign import javascript unsafe "$1.insertBefore($2)"
+  js_insertBefore :: Node -> Node -> IO ()
+
+foreign import javascript unsafe "$1.removeChild($2)"
+  js_removeChild :: Node -> Node -> IO ()
+
+--------------------------------------------------------------------------------
+
+foreign import javascript unsafe "$1.setAttribute($2,$3)"
+  js_setAttributeString :: Node
+                        -> JSString
+                        -- ^ The Attribute Name
+                        -> JSString
+                        -- ^ The attribute value
+                        -> IO ()
+
+-- foreign import javascript unsafe "$1.setAttribute($2,$3)"
+--   js_setAttributeInt :: Node -> AttributeName -> Int -> IO ()
+-- foreign import javascript unsafe "$1.setAttribute($2,$3)"
+--   js_setAttributeBool :: Node -> AttributeName -> Int -> IO ()
+
+
+foreign import javascript unsafe "$1.removeAttribute($2)"
+  js_removeAttribute :: Node
+                     -> JSString
+                     -- ^ The Attribute Name
+                     -> IO ()
+
+--------------------------------------------------------------------------------
+
+foreign import javascript "wrapper sync"
+  js_mkEventHandler :: (JSVal -> IO ()) -> IO JSVal
+
+foreign import javascript unsafe "$1.addEventListener($2,$3)"
+  js_addEventListener :: EventTarget
+                      -> JSString
+                      -> JSVal
+                      -> IO ()
+
+foreign import javascript unsafe "$1.removeEventListener($2,$3)"
+  js_remove_event_listener :: EventTarget -> JSString -> JSVal -> IO ()
