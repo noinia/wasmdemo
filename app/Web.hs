@@ -21,6 +21,7 @@ import           Data.Text (Text)
 import qualified Data.Text as Text
 import           Data.Traversable
 import           Effectful
+import           Effectful.Concurrent.STM
 import           Effectful.Dispatch.Static
 import           FFI
 import           FFI.Types
@@ -95,11 +96,10 @@ removeChild parent child = unsafeEff_  $ js_removeChild (asNode parent) (asNode 
 
 -- | pre: element is of type 'el'
 setAttribute               :: forall el a es element.
-                              (IsNode element, DOM :> es, HasTextRender a)
+                              (IsNode element, DOM :> es, HasSetAttributeValue a)
                            => element -> HtmlAttribute el a -> a -> Eff es ()
 setAttribute el attr value = unsafeEff_ $
-    js_setAttributeString (asNode el) (textToJSString $ attrNameOf attr)
-                                      (textToJSString $ renderAsText value)
+    js_setAttribute (asNode el) (textToJSString $ attrNameOf attr) value
 
 -- | Removes an attribute
 removeAttribute         :: (IsNode element, DOM :> es)
@@ -163,12 +163,59 @@ registerEventHandles handler target = Map.foldMapWithKey $ \evt msg ->
 
 --------------------------------------------------------------------------------
 
+type View msg = Html () msg
+
+data App es msg model = App { appInitialModel  :: model
+                            , appUpdate        :: model -> msg -> Eff es model
+                            , appRenderView    :: model -> View msg
+                            , appInitialAction :: Maybe msg
+                            }
+
+runApp     :: forall es msg model.
+              (Concurrent :> es)
+           => App es msg model -> Eff es ()
+runApp app = do
+               queue <- atomically $ do q <- newTBQueue queueSize
+                                        for_ (appInitialAction app) $ writeTBQueue q
+                                        pure q
+
+               startApp queue (appInitialModel app)
+  where
+    startApp       :: TBQueue msg -> model -> Eff es ()
+    startApp queue = handle
+      where
+        handle       :: model -> Eff es ()
+        handle model = do msg    <- atomically $ readTBQueue queue
+                          model' <- appUpdate app model msg
+                          handle model'
+
+
+
+  -- do
+  --              body   <- jsBody
+  --              tr <- createHtml body (myUI myModel)
+
+
+queueSize = 1000
+
+
+--------------------------------------------------------------------------------
+
 data MyModel = MyModel Text
   deriving (Show,Eq)
+
+myModel :: MyModel
+myModel = MyModel "initial model"
 
 data MyMsg = HasBeenClicked
            | SetMsg Text
 
+myApp :: (JSIO :> es) => App es MyMsg MyModel
+myApp = App { appInitialModel  = myModel
+            , appInitialAction = Nothing
+            , appUpdate        = myUpdate
+            , appRenderView    = myUI
+            }
 
 
 myUpdate   :: (JSIO :> es) => MyModel -> MyMsg -> Eff es MyModel
@@ -237,8 +284,7 @@ instance Bitraversable Html where
            -- deriving (Show,Eq)
 
 createHtml        :: ( DOM :> es, IsNode root
-                     -- , Has' HasTextRender (HtmlAttribute el) Identity
-                     , msg ~ MyMsg
+                     -- , msg ~ MyMsg
                      )
                   => root -> Html a msg -> Eff es (Html Element msg)
 createHtml parent = \case
@@ -249,22 +295,26 @@ createHtml parent = \case
                                        appendChild parent elRef
                                        -- set attrs
                                        -- setAttribute elRef Id "foo"
+                                       traverseAttributes_ (\attr value ->
+                                         has @HasSetAttributeValue attr
+                                            setAttribute elRef attr value) attrs
 
-                                       -- traverseAttributes_ (setAttribute elRef) attrs
                                        -- register event handles
                                        registerEventHandles handler elRef evts
 
                                        chs' <- traverse (createHtml elRef) chs
                                        pure $ HtmlNode el elRef evts attrs chs'
   where
-    handler         :: (msg ~ MyMsg) => msg -> Event -> Eff ES ()
+    handler         :: msg -> Event -> Eff ES ()
     handler msg evt = do consoleLog "should parse the evt"
                          schedule msg
 
 
-schedule     :: (msg ~ MyMsg) => msg -> Eff ES ()
-schedule msg = do m' <- myUpdate (MyModel "dummy") msg
-                  consoleLog $ "result from update" <> showT m'
+schedule     :: msg -> Eff ES ()
+schedule msg = consoleLog "schedule"
+
+  -- do m' <- myUpdate (MyModel "dummy") msg
+  --                 consoleLog $ "result from update" <> showT m'
 
 showT :: Show a => a -> Text
 showT = Text.pack . show
@@ -275,11 +325,11 @@ showT = Text.pack . show
 textNode   :: Text -> Html () msg
 textNode t = TextNode t mempty
 
+-- | Helper data type moddeling assignments to events or attributes.
+data Attr (el :: HtmlElement) (msg :: Type) =           !EventAttr            :- msg
+                                            | forall a. !(HtmlAttribute el a) := a
 
-data Attr (el :: HtmlElement) (msg :: Type) =           !EventAttr            :-> msg
-                                            | forall a. !(HtmlAttribute el a) :=> a
-
-infixr 1 :=>, :->
+infixr 1 :=, :-
 
 
 htmlElement            :: forall el msg. ()
@@ -288,8 +338,8 @@ htmlElement            :: forall el msg. ()
                        -> [Html () msg]
                        -> Html () msg
 htmlElement el ats chs = HtmlNode el mempty
-                                     (Map.fromList  [(k,v) | k :-> v <- ats])
-                                     (attrsFromList [k DSum.:=> Identity v | k :=> v <- ats])
+                                     (Map.fromList  [(k,v) | k :- v <- ats])
+                                     (attrsFromList [k DSum.:=> Identity v | k := v <- ats])
                                      (Seq.fromList chs)
 
 div :: [Attr Div msg] -> [Html () msg] -> Html () msg
@@ -308,18 +358,20 @@ classes = CssClass . Text.unwords . map coerce . F.toList
 
 --------------------------------------------------------------------------------
 
-myUI :: Html () MyMsg
-myUI = div []
-           [ h1  [ Class   :=> classes ["header", "someclass"]
-                 , OnClick :-> HasBeenClicked
-                 ]
-                 [ textNode "header!"
-                 ]
-           , div [] [p [ OnClick :-> SetMsg "woei"
-                       ]
-                       [textNode "woei"]
-                    ]
-           ]
+myUI   :: MyModel -> Html () MyMsg
+myUI m = div []
+             [ h1  [ Class   := classes ["header", "someclass"]
+                   , OnClick :- HasBeenClicked
+                   , Id      := "theHeader"
+                   ]
+                   [ textNode "header!"
+                   ]
+             , div [] [p [ OnClick     :- SetMsg "woei"
+                         , XData "foo" := "bar"
+                         ]
+                         [textNode "woei"]
+                      ]
+             ]
 
 
 --------------------------------------------------------------------------------
@@ -329,7 +381,7 @@ main = runEff . evalJSIO . evalDOM
      $ do consoleLog "woei"
           body   <- jsBody
 
-          tr <- createHtml body myUI
+          tr <- createHtml body (myUI myModel)
 
           textNode <- createTextNode "my text on load"
           appendChild body textNode

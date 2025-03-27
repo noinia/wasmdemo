@@ -16,7 +16,7 @@ module Attributes
 
   , DSum
 
-  , Has'
+  , Has', has', Has(..)
   , Identity(..)
 
   , CssClass(..)
@@ -36,6 +36,7 @@ import           Data.Text (Text)
 import qualified Data.Text as Text
 import           GHC.TypeLits
 import           HtmlElement (HtmlElement)
+import           FFI (HasSetAttributeValue(..))
 
 --------------------------------------------------------------------------------
 
@@ -51,11 +52,11 @@ data HtmlAttribute el a where
   Contenteditable       ::         HtmlAttribute el Text
   XData                 :: Text -> HtmlAttribute el Text
   Dir                   ::         HtmlAttribute el Text
-  Draggable             ::         HtmlAttribute el Text
+  Draggable             ::         HtmlAttribute el Bool
   Enterkeyhint          ::         HtmlAttribute el Text
   Exportparts           ::         HtmlAttribute el Text
   Hidden                ::         HtmlAttribute el Text
-  Id                    ::         HtmlAttribute el Text
+  Id                    ::         HtmlAttribute el HtmlId
   Inert                 ::         HtmlAttribute el Text
   Inputmode             ::         HtmlAttribute el Text
   Is                    ::         HtmlAttribute el Text
@@ -89,7 +90,9 @@ instance GCompare  (HtmlAttribute el) where
   gcompare _ _ = GGT -- FIXME !!
 
 instance ( c Text
+         , c HtmlId
          , c CssClass
+         , c Bool
          ) => Has c (HtmlAttribute el) where
   -- has forall (a :: k) r. f a -> (c a => r) -> r
   has a x = case a of
@@ -257,7 +260,7 @@ traverseAttributes_ f (Attributes m) = DMap.traverseWithKey_ (\attr (Identity x)
 
 newtype HtmlId = HtmlId Text
   deriving stock (Show,Eq,Ord)
-  deriving newtype (IsString, HasTextRender)
+  deriving newtype (IsString, HasTextRender,HasSetAttributeValue)
 
 
 -- type family AttributeValue (attr :: AttributeKind) :: Type
@@ -270,4 +273,7 @@ newtype HtmlId = HtmlId Text
 
 newtype CssClass = CssClass Text
   deriving stock (Show,Eq,Ord)
-  deriving newtype (IsString, HasTextRender)
+  deriving newtype (IsString, HasTextRender,HasSetAttributeValue)
+
+
+-- data Style = Style

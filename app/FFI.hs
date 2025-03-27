@@ -46,18 +46,42 @@ foreign import javascript unsafe "$1.removeChild($2)"
 
 --------------------------------------------------------------------------------
 
-foreign import javascript unsafe "$1.setAttribute($2,$3)"
-  js_setAttributeString :: Node
-                        -> JSString
-                        -- ^ The Attribute Name
-                        -> JSString
-                        -- ^ The attribute value
-                        -> IO ()
+class HasSetAttributeValue t where
+  -- | We can set attributes of this type
+  js_setAttribute :: Node
+                  -> JSString -- ^ The attribute name
+                  -> t
+                  -> IO ()
 
--- foreign import javascript unsafe "$1.setAttribute($2,$3)"
---   js_setAttributeInt :: Node -> AttributeName -> Int -> IO ()
--- foreign import javascript unsafe "$1.setAttribute($2,$3)"
---   js_setAttributeBool :: Node -> AttributeName -> Int -> IO ()
+instance HasSetAttributeValue Text where
+  js_setAttribute node attr = js_setAttribute node attr . textToJSString
+
+instance HasSetAttributeValue JSString where
+  js_setAttribute = js_setAttributeString
+
+foreign import javascript unsafe "$1.setAttribute($2,$3)"
+  js_setAttributeString :: Node -> JSString -> JSString -> IO ()
+
+instance HasSetAttributeValue Bool where
+  js_setAttribute = js_setAttributeBool
+
+foreign import javascript unsafe "$1.setAttribute($2,$3)"
+  js_setAttributeBool :: Node -> JSString -> Bool -> IO ()
+
+instance HasSetAttributeValue Int where
+  js_setAttribute = js_setAttributeInt
+
+foreign import javascript unsafe "$1.setAttribute($2,$3)"
+  js_setAttributeInt :: Node -> JSString -> Int -> IO ()
+
+instance HasSetAttributeValue Double where
+  js_setAttribute = js_setAttributeDouble
+
+foreign import javascript unsafe "$1.setAttribute($2,$3)"
+  js_setAttributeDouble :: Node -> JSString -> Double -> IO ()
+
+
+
 
 
 foreign import javascript unsafe "$1.removeAttribute($2)"
