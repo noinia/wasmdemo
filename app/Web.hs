@@ -75,6 +75,12 @@ jsBody = unsafeEff_ js_body
 jsWindow :: DOM :> es => Eff es Window
 jsWindow = unsafeEff_ js_window
 
+getParent :: (DOM :> es, IsNode element) => element -> Eff es Element
+getParent = unsafeEff_ . coerce . js_getParent . asNode
+  -- FIXME; the coerce here is hacky
+
+--------------------------------------------------------------------------------
+
 createTextNode :: DOM :> es => Text -> Eff es Node
 createTextNode = unsafeEff_ . js_createTextNode . textToJSString
 
@@ -283,6 +289,10 @@ instance Bitraversable Html where
 
            -- deriving (Show,Eq)
 
+
+
+-- TODO: we should give this the appending function somehow
+
 createHtml        :: ( DOM :> es, IsNode root
                      -- , msg ~ MyMsg
                      )
@@ -315,6 +325,75 @@ schedule msg = consoleLog "schedule"
 
   -- do m' <- myUpdate (MyModel "dummy") msg
   --                 consoleLog $ "result from update" <> showT m'
+
+
+
+{-
+class HasPatch a where
+  -- | The type represetning a patch to the given data.
+  data family Patch a :: Type
+
+  -- | returns some description of the operation we have to do to genearte the diff
+  diff :: a
+       -- ^ orig
+       -> a
+       -- ^ new
+       -> Maybe (Patch a)
+
+  -- | Apply the patch, possibly doing some side effect
+  patch :: a -> Patch a -> Eff es a
+
+
+
+-- | We use a very blunt approach for patching text
+
+instance HasPatch Text where
+  newtype Patch Text = ReplaceBy Text
+    deriving stock (Show,Eq,Ord)
+
+  diff orig new
+    | orig == new = Nothing
+    | otherwise  = Just new
+
+  patch _ (ReplaceBy t) = pure t
+
+instance HasPatch (Html a msg) where
+  data Patch (Html a msg) = UpdateTextNode TextNode text
+
+  -- the message part is kind of interesting ...
+  -- since the html doesn't really change I guess
+
+-}
+
+
+-- |
+patchHtml          :: DOM :> es
+                   => Html Element msg -- ^ orig
+                   -> Html a msg -- ^ new
+                   -> Eff es (Maybe (Html Element msg))
+patchHtml orig new =  case orig of
+  TextNode oldText elRef            -> case new of
+    TextNode newText _
+      | oldText == newText -> pure Nothing
+      | otherwise          -> undefined -- set text to newText
+    _                      -> do parent <- getParent elRef
+                                 trRef <- createHtml parent new -- TODO; add to the right place
+                                 removeChild parent elRef
+                                 pure undefined -- new with the data replaced
+
+  HtmlNode el elRef evts attrs chs -> case new of
+    TextNode text _                  -> do parent <- getParent elRef
+                                           newRef <- createTextNode text
+                                           -- TODO: add the text node
+                                           pure $ Just (TextNode text (coerce newRef))
+    HtmlNode el' _ evts' attrs' chs' -> do pure Nothing --old -- TODO
+
+
+
+
+
+
+
 
 showT :: Show a => a -> Text
 showT = Text.pack . show

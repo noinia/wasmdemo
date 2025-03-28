@@ -18,6 +18,10 @@ foreign import javascript unsafe "return document.body"
 foreign import javascript unsafe "return window"
   js_window :: IO Window
 
+
+foreign import javascript unsafe "return $1.parentNode"
+  js_getParent :: Node -> IO Node
+
 --------------------------------------------------------------------------------
 
 foreign import javascript unsafe "console.log($1)"
@@ -30,6 +34,8 @@ foreign import javascript unsafe "document.createTextNode($1)"
 
 foreign import javascript unsafe "document.createElement($1)"
   js_createElement :: JSString -> IO Element
+
+
 
 
 --------------------------------------------------------------------------------

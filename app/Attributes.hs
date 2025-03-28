@@ -40,8 +40,17 @@ import           FFI (HasSetAttributeValue(..))
 
 --------------------------------------------------------------------------------
 
+data NoYes = No | Yes
+  deriving stock (Show,Read,Eq,Ord,Enum)
+
+instance HasSetAttributeValue NoYes where
+  js_setAttribute node attr = js_setAttribute node attr . \case
+    No  -> "no" :: Text
+    Yes -> "yes"
+
 -- | Maybe used on all elements
 data HtmlAttribute el a where
+  -- global attributes
   Accesskey             ::         HtmlAttribute el Text
   Anchor                ::         HtmlAttribute el Text
     -- Experimental Non-standard
@@ -71,13 +80,43 @@ data HtmlAttribute el a where
   Popover               ::         HtmlAttribute el Text
   Slot                  ::         HtmlAttribute el Text
   Spellcheck            ::         HtmlAttribute el Text
-  Style                 ::         HtmlAttribute el Text
+  Style                 ::         HtmlAttribute el CssStyle
   Tabindex              ::         HtmlAttribute el Text
   Title                 ::         HtmlAttribute el Text
-  Translate             ::         HtmlAttribute el Text
+  Translate             ::         HtmlAttribute el NoYes
   Virtualkeyboardpolicy ::         HtmlAttribute el Text
   -- Experimental
   Writingsuggestions    ::         HtmlAttribute el Text
+
+  -- specific inputs
+
+
+    -- accept
+    -- autocomplete
+    -- capture
+    -- crossorigin
+    -- dirname
+    -- disabled
+    -- elementtiming
+    -- for
+    -- max
+    -- maxlength
+    -- min
+    -- minlength
+    -- multiple
+    -- pattern
+    -- placeholder
+    -- readonly
+    -- rel
+    -- required
+    -- size
+    -- step
+
+
+
+
+
+
 
 deriving stock instance Show (HtmlAttribute el a)
 
@@ -91,8 +130,8 @@ instance GCompare  (HtmlAttribute el) where
 
 instance ( c Text
          , c HtmlId
-         , c CssClass
-         , c Bool
+         , c CssClass, c CssStyle
+         , c Bool, c NoYes
          ) => Has c (HtmlAttribute el) where
   -- has forall (a :: k) r. f a -> (c a => r) -> r
   has a x = case a of
@@ -277,3 +316,7 @@ newtype CssClass = CssClass Text
 
 
 -- data Style = Style
+
+newtype CssStyle = CssStyle Text
+  deriving stock (Show,Eq,Ord)
+  deriving newtype (IsString, HasTextRender,HasSetAttributeValue)
