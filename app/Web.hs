@@ -3,6 +3,7 @@
 module Main where
 
 import           Attributes
+import           Control.Monad (void)
 import           Data.Bifoldable
 import           Data.Bifunctor
 import           Data.Bitraversable
@@ -22,7 +23,11 @@ import qualified Data.Text as Text
 import           Data.Traversable
 import           Effectful
 import           Effectful.Concurrent.STM
+import           Effectful.Dispatch.Dynamic
+import qualified Effectful.Dispatch.Dynamic as Eff
 import           Effectful.Dispatch.Static
+import           Effectful.Dispatch.Static.Primitive (emptyEnv)
+import           Effectful.Reader.Static
 import           FFI
 import           FFI.Types
 import           GHC.Wasm.Prim
@@ -32,7 +37,7 @@ import           Prelude hiding (div)
 
 --------------------------------------------------------------------------------
 
-type JSFunction = JSVal
+-- type JSFunction = JSVal
 
 foreign export javascript "hs_start"
   main :: IO ()
@@ -60,9 +65,10 @@ evalJSIO :: IOE :> es => Eff (JSIO : es) a -> Eff es a
 evalJSIO = evalStaticRep (MkJSIO ())
 
 
-type ES = [DOM,JSIO,IOE]
-evalInIO :: Eff ES a -> IO a
-evalInIO = runEff . evalJSIO . evalDOM
+-- type ES msg = [DOM,JSIO,IOE]
+
+-- evalInIO :: Eff ES a -> IO a
+-- evalInIO = runEff . evalJSIO . evalDOM
 
 --------------------------------------------------------------------------------
 
@@ -115,21 +121,71 @@ removeAttribute el attr = unsafeEff_ $
 
 --------------------------------------------------------------------------------
 
+-- type CanSchedule handlerEs = Reader.Reader (Eff handlerEs () -> Eff '[JSIO] ())
+
+
+-- data CanSchedule handlerEs :: Effect where
+--   SetupEventHandler :: CanSchedule handlerEs m (Eff handlerEs () -> IO ())
+
+-- type instance DispatchOf (CanSchedule handlerEs) = Dynamic
+
+-- setupEventHandler :: ( CanSchedule handlerEs :> es
+--                      , HasCallStack
+--                      )
+--                   => Eff es (Eff handlerEs () -> Eff '[JSIO] ())
+-- setupEventHandler = Reader.ask
+
+
+-- withEventSetup :: ( Eff handlerEs () -> IO () )
+--                -> Eff handlerEs a
+--                -> Eff es a
+-- withEventSetup
+
+-- schedule ::
+
+--   Eff (CanSchedule handlerEs : es) a -> Eff es a
+-- schedule = Reader.runReader
+
+
+
+-- setupEventHandler = send
+
+
+
+-- data CanSchedule handlerEs es where
+--   schedule ::
+
 consoleLog :: JSIO :> es => Text -> Eff es ()
 consoleLog = unsafeEff_  . js_log . textToJSString
 
-addEventListener                    :: (IsEventTarget eventTarget, DOM :> es)
-                                    => eventTarget
-                                    -> EventAttr
-                                    -> EventListener ()
-                                    -> Eff es ()
-addEventListener target
-                 eventType
-                 (EventListener listener) = unsafeEff_  $ do
-  listener' <- js_mkEventHandler (coerce @_ @(JSVal -> IO ()) listener)
-  js_addEventListener (asEventTarget target)
-                      (textToJSString . coerce $ asEventType eventType)
-                      listener'
+-- | Type that explains how to actually run an EventHandler in IO
+type EventHandlerRunner handlerEs = Eff handlerEs () -> IO ()
+
+-- | Shorthand
+type CanRunHandler handlerEs = Reader (EventHandlerRunner handlerEs)
+
+-- | Add an Event Listener.
+addEventListener                           :: forall handlerEs es eventTarget.
+                                              ( IsEventTarget eventTarget
+                                              , DOM                     :> es
+                                              , CanRunHandler handlerEs :> es
+                                              )
+                                           => eventTarget
+                                           -> EventAttr
+                                           -> (Event -> Eff handlerEs ())
+                                           -> Eff es ()
+addEventListener target eventType listener = do
+    -- get the eventHandlerRunner; i.e. the thing that we use to run the Eff hanlder () in the
+    -- IO monad.
+    runListener <- ask @(Eff handlerEs () -> IO ())
+    let jsListener :: JSVal -> IO ()
+        jsListener = runListener . listener . Event
+    unsafeEff_  $ do
+      -- we create the callback
+      listenerRef   <- js_mkEventHandler jsListener
+      js_addEventListener (asEventTarget target)
+                          (textToJSString . coerce $ asEventType eventType)
+                          listenerRef
 
 removeEventListener                 :: (IsEventTarget eventTarget, DOM :> es)
                                     => eventTarget
@@ -160,26 +216,78 @@ update = undefined
 
 --------------------------------------------------------------------------------
 
-registerEventHandles                :: (IsEventTarget target, DOM :> es)
-                                    => (msg -> Event -> Eff ES ())
+registerEventHandles                :: ( IsEventTarget target
+                                       , DOM                     :> es
+                                       , CanRunHandler handlerEs :> es
+                                       )
+                                    => ( msg -> Event -> Eff handlerEs () )
+                                         -- ^ our event handler
                                     -> target
                                     -> Map EventAttr msg -> Eff es ()
 registerEventHandles handler target = Map.foldMapWithKey $ \evt msg ->
-    addEventListener (asEventTarget target) evt (EventListener $ evalInIO . handler msg)
+                                        addEventListener (asEventTarget target)
+                                                         evt
+                                                         (handler msg)
+
+
+
+--------------------------------------------------------------------------------
+
+data Send msg :: Effect where
+  SendMessage :: msg -> Send msg m ()
+
+type instance DispatchOf (Send msg) = Dynamic
+
+sendMessage :: (Send msg :> es, HasCallStack) => msg -> Eff es ()
+sendMessage = Eff.send . SendMessage
+
+-- | A way of implementing send
+runSendWith       :: Concurrent :> es
+                  => TBQueue msg -> Eff (Send msg : es) a -> Eff es a
+runSendWith queue = interpret $ \_ -> \case
+    SendMessage msg -> atomically $ writeTBQueue queue msg
+-- I want this to be pretty mcuh the only way of implemething send?
+
+-- evalSend
+
+
+-- data Send msg :: Effect
+
+-- type instance DispatchOf (Send msg)  = Static WithSideEffects
+-- newtype instance StaticRep (Send msg) = SendDispatch (TBQueue msg)
+
+-- sendMessage     :: (Send msg :> es, Concurrent es) => msg -> Eff es ()
+-- sendMessage msg = do SendDispatch queue <- getStaticRep
+--                      writeTBQueue es
+
 
 --------------------------------------------------------------------------------
 
 type View msg = Html () msg
 
-data App es msg model = App { appInitialModel  :: model
-                            , appUpdate        :: model -> msg -> Eff es model
-                            , appRenderView    :: model -> View msg
-                            , appInitialAction :: Maybe msg
-                            }
+data App handlerEs msg model =
+  App { appInitialModel  :: model
+      -- , appUpdate        :: model -> msg -> Eff es model
+      , appUpdate        :: model -> msg -> Eff handlerEs model
+      , appRenderView    :: model -> View msg
+      , appInitialAction :: Maybe msg
+      }
 
-runApp     :: forall es msg model.
-              (Concurrent :> es)
-           => App es msg model -> Eff es ()
+runApp     :: forall handlerEs es msg model.
+              ( Concurrent :> es
+              -- , Send msg   :> handlerEs
+
+              , DOM        :> es
+              , JSIO       :> es
+              , Concurrent :> es
+
+              , IOE        :> es
+
+              -- , IOE        :> handlerEs
+                -- handlerEs ~ [Send msg, DOM, Concurrent, JSIO]
+              , handlerEs ~ [Send msg, DOM, JSIO, Concurrent, IOE]
+              )
+           => App handlerEs msg model -> Eff es ()
 runApp app = do
                queue <- atomically $ do q <- newTBQueue queueSize
                                         for_ (appInitialAction app) $ writeTBQueue q
@@ -188,12 +296,36 @@ runApp app = do
                startApp queue (appInitialModel app)
   where
     startApp       :: TBQueue msg -> model -> Eff es ()
-    startApp queue = handle
+    startApp queue = void . handle
       where
-        handle       :: model -> Eff es ()
+        runner :: EventHandlerRunner handlerEs
+        runner = runEff
+               . runConcurrent
+               . evalJSIO
+               . evalDOM
+               . runSendWith queue
+
+        -- runner' :: Eff handlerEs a -> Eff es a
+        -- runner' = runConcurrent
+        --         . evalJSIO
+        --         . evalDOM
+        --         . runSendWith queue
+
+        runInEff :: Eff handlerEs a -> Eff es a
+        runInEff = inject . runSendWith queue
+
+        handle       :: model -> Eff es model
         handle model = do msg    <- atomically $ readTBQueue queue
-                          model' <- appUpdate app model msg
+                          model' <- runInEff $ (appUpdate app) model msg
+                                    -- this doesn't seem right yet.
                           handle model'
+
+
+
+-- runSendWith queue
+--                    . Reader.runReader runner
+--                    .
+
 
 
 
@@ -215,21 +347,31 @@ myModel = MyModel "initial model"
 
 data MyMsg = HasBeenClicked
            | SetMsg Text
+           | MyInitialAction
 
-myApp :: (JSIO :> es) => App es MyMsg MyModel
+myApp :: ( JSIO :> es
+         , DOM  :> es -- FIXME
+         ) => App es MyMsg MyModel
 myApp = App { appInitialModel  = myModel
-            , appInitialAction = Nothing
+            , appInitialAction = Just MyInitialAction
             , appUpdate        = myUpdate
             , appRenderView    = myUI
             }
 
 
-myUpdate   :: (JSIO :> es) => MyModel -> MyMsg -> Eff es MyModel
+myUpdate   :: ( JSIO :> es
+              , DOM  :> es -- not sure if I want this
+              -- , CanSchedule handlerEs :> es
+              ) => MyModel -> MyMsg -> Eff es MyModel
 myUpdate m = \case
-    HasBeenClicked -> do consoleLog "hasbeen clicked :)"
-                         pure m
-    SetMsg t       -> do consoleLog "setting msg"
-                         pure $ MyModel t
+    HasBeenClicked  -> do consoleLog "hasbeen clicked :)"
+                          pure m
+    SetMsg t        -> do consoleLog "setting msg"
+                          pure $ MyModel t
+    MyInitialAction -> do consoleLog "initial Action"
+                          body   <- jsBody
+                          -- _tr <- createHtml body (myUI myModel)
+                          pure m
 
 --------------------------------------------------------------------------------
 
@@ -293,8 +435,12 @@ instance Bitraversable Html where
 
 -- TODO: we should give this the appending function somehow
 
-createHtml        :: ( DOM :> es, IsNode root
-                     -- , msg ~ MyMsg
+createHtml        :: forall handlerEs es root a msg.
+                     ( IsNode root
+                     , DOM                     :> es
+                     , CanRunHandler handlerEs :> es
+                     , Send msg                :> handlerEs
+                     , JSIO                    :> handlerEs
                      )
                   => root -> Html a msg -> Eff es (Html Element msg)
 createHtml parent = \case
@@ -312,16 +458,15 @@ createHtml parent = \case
                                        -- register event handles
                                        registerEventHandles handler elRef evts
 
-                                       chs' <- traverse (createHtml elRef) chs
+                                       chs' <- traverse (createHtml @handlerEs elRef) chs
                                        pure $ HtmlNode el elRef evts attrs chs'
   where
-    handler         :: msg -> Event -> Eff ES ()
+    handler         :: msg -> Event -> Eff handlerEs ()
     handler msg evt = do consoleLog "should parse the evt"
-                         schedule msg
+                         sendMessage msg
 
-
-schedule     :: msg -> Eff ES ()
-schedule msg = consoleLog "schedule"
+-- schedule     :: msg -> Eff ES ()
+-- schedule msg = consoleLog "schedule"
 
   -- do m' <- myUpdate (MyModel "dummy") msg
   --                 consoleLog $ "result from update" <> showT m'
@@ -367,7 +512,12 @@ instance HasPatch (Html a msg) where
 
 
 -- |
-patchHtml          :: DOM :> es
+patchHtml          :: forall es handlerEs msg a.
+                      ( DOM :> es
+                      , CanRunHandler handlerEs :> es
+                      , Send msg :> handlerEs
+                      , JSIO :> handlerEs
+                      )
                    => Html Element msg -- ^ orig
                    -> Html a msg -- ^ new
                    -> Eff es (Maybe (Html Element msg))
@@ -377,7 +527,7 @@ patchHtml orig new =  case orig of
       | oldText == newText -> pure Nothing
       | otherwise          -> undefined -- set text to newText
     _                      -> do parent <- getParent elRef
-                                 trRef <- createHtml parent new -- TODO; add to the right place
+                                 trRef <- createHtml @handlerEs parent new -- TODO; add to the right place
                                  removeChild parent elRef
                                  pure undefined -- new with the data replaced
 
@@ -453,10 +603,18 @@ myUI m = div []
              ]
 
 
+
+
+
 --------------------------------------------------------------------------------
 
 main :: IO ()
-main = runEff . evalJSIO . evalDOM
+main = runEff . runConcurrent . evalJSIO . evalDOM
+     $ runApp myApp
+
+
+{-
+
      $ do consoleLog "woei"
           body   <- jsBody
 
@@ -481,3 +639,5 @@ main = runEff . evalJSIO . evalDOM
           --   appendChild body textNode
 
           consoleLog "added"
+
+-}
