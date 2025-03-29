@@ -288,38 +288,40 @@ runApp     :: forall handlerEs es msg model.
               , handlerEs ~ [Send msg, DOM, JSIO, Concurrent, IOE]
               )
            => App handlerEs msg model -> Eff es ()
-runApp app = do
-               queue <- atomically $ do q <- newTBQueue queueSize
-                                        for_ (appInitialAction app) $ writeTBQueue q
-                                        pure q
+runApp app@(App { appUpdate        = updateHandler
+                , appRenderView    = renderView
+                }
+           ) = do
+                 queue <- atomically $ do q <- newTBQueue queueSize
+                                          for_ (appInitialAction app) $ writeTBQueue q
+                                          pure q
 
-               startApp queue (appInitialModel app)
+                 body     <- jsBody
+                 startApp queue body
+
   where
-    startApp       :: TBQueue msg -> model -> Eff es ()
-    startApp queue = void . handle
+    startApp            :: TBQueue msg -> Body -> Eff es ()
+    startApp queue body = do
+                            htmlTree <- runReader runner $
+                              createHtml @handlerEs body $ renderView (appInitialModel app)
+                            handle htmlTree (appInitialModel app)
       where
+        handle                :: Html Element msg -> model -> Eff es ()
+        handle htmlTree model = do msg    <- atomically $ readTBQueue queue
+                                   model' <- runInEff $ updateHandler model msg
+                                   -- this doesn't seem right yet.
+                                   handle htmlTree model'
+                                   -- we may wish to diff the tree
+
+        runInEff :: Eff handlerEs a -> Eff es a
+        runInEff = inject . runSendWith queue
+
         runner :: EventHandlerRunner handlerEs
         runner = runEff
                . runConcurrent
                . evalJSIO
                . evalDOM
                . runSendWith queue
-
-        -- runner' :: Eff handlerEs a -> Eff es a
-        -- runner' = runConcurrent
-        --         . evalJSIO
-        --         . evalDOM
-        --         . runSendWith queue
-
-        runInEff :: Eff handlerEs a -> Eff es a
-        runInEff = inject . runSendWith queue
-
-        handle       :: model -> Eff es model
-        handle model = do msg    <- atomically $ readTBQueue queue
-                          model' <- runInEff $ (appUpdate app) model msg
-                                    -- this doesn't seem right yet.
-                          handle model'
-
 
 
 -- runSendWith queue
@@ -361,7 +363,6 @@ myApp = App { appInitialModel  = myModel
 
 myUpdate   :: ( JSIO :> es
               , DOM  :> es -- not sure if I want this
-              -- , CanSchedule handlerEs :> es
               ) => MyModel -> MyMsg -> Eff es MyModel
 myUpdate m = \case
     HasBeenClicked  -> do consoleLog "hasbeen clicked :)"
@@ -370,7 +371,6 @@ myUpdate m = \case
                           pure $ MyModel t
     MyInitialAction -> do consoleLog "initial Action"
                           body   <- jsBody
-                          -- _tr <- createHtml body (myUI myModel)
                           pure m
 
 --------------------------------------------------------------------------------
