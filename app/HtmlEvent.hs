@@ -8,52 +8,52 @@ import FFI.Types
 
 
 data EventAttr = OnAbort
-               | OnAutocomplete
-               | OnAutocompleteerror
+               | OnAutoComplete
+               | OnAutoCompleteError
                | OnBlur
                | OnCancel
                | OnCanplay
-               | OnCanplaythrough
+               | OnCanplayThrough
                | OnChange
                | OnClick
                | OnClose
-               | OnContextmenu
-               | OnCuechange
-               | OnDblclick
+               | OnContextMenu
+               | OnCueChange
+               | OnDblClick
                | OnDrag
-               | OnDragend
-               | OnDragenter
-               | OnDragleave
-               | OnDragover
-               | OnDragstart
+               | OnDragEnd
+               | OnDragEnter
+               | OnDragLeave
+               | OnDragOver
+               | OnDragStart
                | OnDrop
-               | OnDurationchange
+               | OnDurationChange
                | OnEmptied
                | OnEnded
                | OnError
                | OnFocus
                | OnInput
                | OnInvalid
-               | OnKeydown
-               | OnKeypress
-               | OnKeyup
+               | OnKeyDown
+               | OnKeyPress
+               | OnKeyUp
                | OnLoad
-               | OnLoadeddata
-               | OnLoadedmetadata
-               | OnLoadstart
-               | OnMousedown
-               | OnMouseenter
-               | OnMouseleave
-               | OnMousemove
-               | OnMouseout
-               | OnMouseover
-               | OnMouseup
-               | OnMousewheel
+               | OnLoadedData
+               | OnLoadedMetaData
+               | OnLoadStart
+               | OnMouseDown
+               | OnMouseEnter
+               | OnMouseLeave
+               | OnMouseMove
+               | OnMouseOut
+               | OnMouseOver
+               | OnMouseUp
+               | OnMouseWheel
                | OnPause
                | OnPlay
                | OnPlaying
                | OnProgress
-               | OnRatechange
+               | OnRateChange
                | OnReset
                | OnResize
                | OnScroll
@@ -65,9 +65,9 @@ data EventAttr = OnAbort
                | OnStalled
                | OnSubmit
                | OnSuspend
-               | OnTimeupdate
+               | OnTimeUpdate
                | OnToggle
-               | OnVolumechange
+               | OnVolumeChange
                | OnWaiting
                deriving (Show,Eq,Ord,Enum)
 
@@ -75,52 +75,52 @@ data EventAttr = OnAbort
 asEventType :: EventAttr -> EventType
 asEventType = EventType . \case
   OnAbort             -> "abort"
-  OnAutocomplete      -> "autocomplete"
-  OnAutocompleteerror -> "autocompleteerror"
+  OnAutoComplete      -> "autocomplete"
+  OnAutoCompleteError -> "autocompleteerror"
   OnBlur              -> "blur"
   OnCancel            -> "cancel"
   OnCanplay           -> "canplay"
-  OnCanplaythrough    -> "canplaythrough"
+  OnCanplayThrough    -> "canplaythrough"
   OnChange            -> "change"
   OnClick             -> "click"
   OnClose             -> "close"
-  OnContextmenu       -> "contextmenu"
-  OnCuechange         -> "cuechange"
-  OnDblclick          -> "dblclick"
+  OnContextMenu       -> "contextmenu"
+  OnCueChange         -> "cuechange"
+  OnDblClick          -> "dblclick"
   OnDrag              -> "drag"
-  OnDragend           -> "dragend"
-  OnDragenter         -> "dragenter"
-  OnDragleave         -> "dragleave"
-  OnDragover          -> "dragover"
-  OnDragstart         -> "dragstart"
+  OnDragEnd           -> "dragend"
+  OnDragEnter         -> "dragenter"
+  OnDragLeave         -> "dragleave"
+  OnDragOver          -> "dragover"
+  OnDragStart         -> "dragstart"
   OnDrop              -> "drop"
-  OnDurationchange    -> "durationchange"
+  OnDurationChange    -> "durationchange"
   OnEmptied           -> "emptied"
   OnEnded             -> "ended"
   OnError             -> "error"
   OnFocus             -> "focus"
   OnInput             -> "input"
   OnInvalid           -> "invalid"
-  OnKeydown           -> "keydown"
-  OnKeypress          -> "keypress"
-  OnKeyup             -> "keyup"
+  OnKeyDown           -> "keydown"
+  OnKeyPress          -> "keypress"
+  OnKeyUp             -> "keyup"
   OnLoad              -> "load"
-  OnLoadeddata        -> "loadeddata"
-  OnLoadedmetadata    -> "loadedmetadata"
-  OnLoadstart         -> "loadstart"
-  OnMousedown         -> "mousedown"
-  OnMouseenter        -> "mouseenter"
-  OnMouseleave        -> "mouseleave"
-  OnMousemove         -> "mousemove"
-  OnMouseout          -> "mouseout"
-  OnMouseover         -> "mouseover"
-  OnMouseup           -> "mouseup"
-  OnMousewheel        -> "mousewheel"
+  OnLoadedData        -> "loadeddata"
+  OnLoadedMetaData    -> "loadedmetadata"
+  OnLoadStart         -> "loadstart"
+  OnMouseDown         -> "mousedown"
+  OnMouseEnter        -> "mouseenter"
+  OnMouseLeave        -> "mouseleave"
+  OnMouseMove         -> "mousemove"
+  OnMouseOut          -> "mouseout"
+  OnMouseOver         -> "mouseover"
+  OnMouseUp           -> "mouseup"
+  OnMouseWheel        -> "mousewheel"
   OnPause             -> "pause"
   OnPlay              -> "play"
   OnPlaying           -> "playing"
   OnProgress          -> "progress"
-  OnRatechange        -> "ratechange"
+  OnRateChange        -> "ratechange"
   OnReset             -> "reset"
   OnResize            -> "resize"
   OnScroll            -> "scroll"
@@ -132,7 +132,7 @@ asEventType = EventType . \case
   OnStalled           -> "stalled"
   OnSubmit            -> "submit"
   OnSuspend           -> "suspend"
-  OnTimeupdate        -> "timeupdate"
+  OnTimeUpdate        -> "timeupdate"
   OnToggle            -> "toggle"
-  OnVolumechange      -> "volumechange"
+  OnVolumeChange      -> "volumechange"
   OnWaiting           -> "waiting"
