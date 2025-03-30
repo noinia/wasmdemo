@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
-module HtmlElement where
+module EffWeb.Html.Element where
 
 import           Data.String (IsString(..))
 import           Data.Text (Text)

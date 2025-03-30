@@ -2,8 +2,6 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 module Main where
 
-import           Attributes
-import qualified Attributes as A
 import           Control.Monad (void)
 import           Data.Bifoldable
 import           Data.Bifunctor
@@ -22,6 +20,12 @@ import           Data.String (IsString(..))
 import           Data.Text (Text)
 import qualified Data.Text as Text
 import           Data.Traversable
+import           EffWeb.DOM.FFI
+import           EffWeb.DOM.FFI.Types
+import           EffWeb.Html.Attribute
+import qualified EffWeb.Html.Attribute as A
+import           EffWeb.Html.Element
+import           EffWeb.Html.Event
 import           Effectful
 import           Effectful.Concurrent.STM
 import           Effectful.Dispatch.Dynamic
@@ -29,11 +33,7 @@ import qualified Effectful.Dispatch.Dynamic as Eff
 import           Effectful.Dispatch.Static
 import           Effectful.Dispatch.Static.Primitive (emptyEnv)
 import           Effectful.Reader.Static
-import           FFI
-import           FFI.Types
 import           GHC.Wasm.Prim
-import           HtmlElement
-import           HtmlEvent
 import           Prelude hiding (div)
 
 --------------------------------------------------------------------------------

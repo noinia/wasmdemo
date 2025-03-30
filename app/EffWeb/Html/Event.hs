@@ -1,10 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
-module HtmlEvent
+module EffWeb.Html.Event
   ( EventAttr(..)
   , asEventType
   ) where
 
-import FFI.Types
+import EffWeb.DOM.FFI.Types
 
 
 data EventAttr = OnAbort

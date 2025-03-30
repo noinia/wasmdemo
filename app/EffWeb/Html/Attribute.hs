@@ -1,6 +1,6 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
-module Attributes
+module EffWeb.Html.Attribute
   ( HtmlAttribute(..)
   , Attributes(..)
 
@@ -35,8 +35,8 @@ import           Data.String (IsString(..))
 import           Data.Text (Text)
 import qualified Data.Text as Text
 import           GHC.TypeLits
-import           HtmlElement (HtmlElement)
-import           FFI (HasSetAttributeValue(..))
+import           EffWeb.Html.Element (HtmlElement)
+import           EffWeb.DOM.FFI (HasSetAttributeValue(..))
 
 --------------------------------------------------------------------------------
 

@@ -52,6 +52,15 @@ common warnings
       , PartialTypeSignatures
       , QuantifiedConstraints
 
+
+-- library
+--     import: warnings
+--     hs-source-dirs: src
+--     exposed-modules:
+       -- EffWeb.Html.Event
+       -- EffWeb.Html.Element
+       -- EffWeb.Html.Attribute
+
 executable wasmdemo
     import:           warnings
     main-is:          Main.hs
@@ -66,11 +75,18 @@ executable wasmdemo-web
     ghc-options: -no-hs-main -optl-mexec-model=reactor -optl-Wl,--export=hs_start
 
     other-modules:
-        Attributes
-        HtmlElement
-        HtmlEvent
-        FFI
-        FFI.Types
+       EffWeb.Html.Event
+       EffWeb.Html.Element
+       EffWeb.Html.Attribute
+
+       EffWeb.DOM.FFI
+       EffWeb.DOM.FFI.Types
+
+        -- Attributes
+        -- HtmlElement
+        -- HtmlEvent
+        -- FFI
+        -- FFI.Types
     -- other-extensions:
 
     hs-source-dirs:   app

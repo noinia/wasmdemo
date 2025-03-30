@@ -1,10 +1,10 @@
-module FFI where
+module EffWeb.DOM.FFI where
 
 import           Data.Coerce
 import           Data.String (IsString(..))
 import           Data.Text (Text)
 import qualified Data.Text as Text
-import           FFI.Types
+import           EffWeb.DOM.FFI.Types
 import           GHC.Wasm.Prim
 
 --------------------------------------------------------------------------------

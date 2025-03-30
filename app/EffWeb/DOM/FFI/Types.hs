@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
-module FFI.Types where
+module EffWeb.DOM.FFI.Types where
 
 import           Data.Coerce
 import           Data.String (IsString(..))
