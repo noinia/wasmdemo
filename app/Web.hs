@@ -3,6 +3,7 @@
 module Main where
 
 import           Attributes
+import qualified Attributes as A
 import           Control.Monad (void)
 import           Data.Bifoldable
 import           Data.Bifunctor
@@ -107,7 +108,7 @@ removeChild parent child = unsafeEff_  $ js_removeChild (asNode parent) (asNode 
 --------------------------------------------------------------------------------
 
 -- | pre: element is of type 'el'
-setAttribute               :: forall el a es element.
+setAttribute               :: forall el msg a es element.
                               (IsNode element, DOM :> es, HasSetAttributeValue a)
                            => element -> HtmlAttribute el a -> a -> Eff es ()
 setAttribute el attr value = unsafeEff_ $
@@ -273,19 +274,28 @@ data App handlerEs msg model =
       , appInitialAction :: Maybe msg
       }
 
+
+type SyncES msg = [Send msg, JSIO, Concurrent, IOE]
+
 runApp     :: forall handlerEs es msg model.
               ( Concurrent :> es
-              -- , Send msg   :> handlerEs
-
               , DOM        :> es
               , JSIO       :> es
-              , Concurrent :> es
 
-              , IOE        :> es
+              , IOE        :> es  -- we should avoid this one ...
+              , Subset handlerEs es
+
+
+
+              -- , JSIO       :> es
+              -- , Concurrent :> handlerEs
+
+              -- , IOE        :> es
 
               -- , IOE        :> handlerEs
                 -- handlerEs ~ [Send msg, DOM, Concurrent, JSIO]
-              , handlerEs ~ [Send msg, DOM, JSIO, Concurrent, IOE]
+              -- , handlerEs ~ [Send msg, DOM, JSIO, Concurrent, IOE]
+              -- , es
               )
            => App handlerEs msg model -> Eff es ()
 runApp app@(App { appUpdate        = updateHandler
@@ -303,24 +313,24 @@ runApp app@(App { appUpdate        = updateHandler
     startApp            :: TBQueue msg -> Body -> Eff es ()
     startApp queue body = do
                             htmlTree <- runReader runner $
-                              createHtml @handlerEs body $ renderView (appInitialModel app)
+                              createHtml @(SyncES msg) body $ renderView (appInitialModel app)
                             handle htmlTree (appInitialModel app)
       where
         handle                :: Html Element msg -> model -> Eff es ()
         handle htmlTree model = do msg    <- atomically $ readTBQueue queue
                                    model' <- runInEff $ updateHandler model msg
-                                   -- this doesn't seem right yet.
                                    handle htmlTree model'
                                    -- we may wish to diff the tree
 
         runInEff :: Eff handlerEs a -> Eff es a
-        runInEff = inject . runSendWith queue
+        runInEff = inject
+          -- . runSendWith queue
 
-        runner :: EventHandlerRunner handlerEs
+        runner :: EventHandlerRunner (SyncES msg)
         runner = runEff
                . runConcurrent
                . evalJSIO
-               . evalDOM
+               -- . evalDOM
                . runSendWith queue
 
 
@@ -341,7 +351,7 @@ queueSize = 1000
 
 --------------------------------------------------------------------------------
 
-data MyModel = MyModel Text
+data MyModel = MyModel { modelText :: Text }
   deriving (Show,Eq)
 
 myModel :: MyModel
@@ -352,7 +362,6 @@ data MyMsg = HasBeenClicked
            | MyInitialAction
 
 myApp :: ( JSIO :> es
-         , DOM  :> es -- FIXME
          ) => App es MyMsg MyModel
 myApp = App { appInitialModel  = myModel
             , appInitialAction = Just MyInitialAction
@@ -362,7 +371,6 @@ myApp = App { appInitialModel  = myModel
 
 
 myUpdate   :: ( JSIO :> es
-              , DOM  :> es -- not sure if I want this
               ) => MyModel -> MyMsg -> Eff es MyModel
 myUpdate m = \case
     HasBeenClicked  -> do consoleLog "hasbeen clicked :)"
@@ -370,7 +378,6 @@ myUpdate m = \case
     SetMsg t        -> do consoleLog "setting msg"
                           pure $ MyModel t
     MyInitialAction -> do consoleLog "initial Action"
-                          body   <- jsBody
                           pure m
 
 --------------------------------------------------------------------------------
@@ -597,8 +604,11 @@ myUI m = div []
                    ]
              , div [] [p [ OnClick     :- SetMsg "woei"
                          , XData "foo" := "bar"
+                         , A.Style     := "border: 1px solid black; width: 200px; height: 100px;"
+                         , OnMouseOver :- SetMsg "hovering"
                          ]
-                         [textNode "woei"]
+                         [ textNode $ modelText m
+                         ]
                       ]
              ]
 
@@ -609,8 +619,11 @@ myUI m = div []
 --------------------------------------------------------------------------------
 
 main :: IO ()
-main = runEff . runConcurrent . evalJSIO . evalDOM
-     $ runApp myApp
+main = runEff . runConcurrent . evalJSIO . evalDOM -- $ runApp myApp
+     $ main'
+  where
+    main' :: Eff [DOM, JSIO, Concurrent, IOE] ()
+    main' = runApp @[JSIO, IOE] myApp
 
 
 {-
