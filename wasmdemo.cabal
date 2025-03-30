@@ -79,8 +79,15 @@ executable wasmdemo-web
        EffWeb.Html.Element
        EffWeb.Html.Attribute
 
+       EffWeb.DOM.Effect
        EffWeb.DOM.FFI
+       EffWeb.DOM.FFI.Raw
        EffWeb.DOM.FFI.Types
+
+       EffWeb.JSIO
+
+       EffWeb.Send
+
 
         -- Attributes
         -- HtmlElement

@@ -36,7 +36,7 @@ import           Data.Text (Text)
 import qualified Data.Text as Text
 import           GHC.TypeLits
 import           EffWeb.Html.Element (HtmlElement)
-import           EffWeb.DOM.FFI (HasSetAttributeValue(..))
+import           EffWeb.DOM.FFI.Raw (HasSetAttributeValue(..))
 
 --------------------------------------------------------------------------------
 
