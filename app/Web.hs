@@ -50,84 +50,18 @@ foreign export javascript "hs_start"
   main :: IO ()
 
 
-
 --------------------------------------------------------------------------------
 
-
---------------------------------------------------------------------------------
-
-
-
-
--- type ES msg = [DOM,JSIO,IOE]
-
--- evalInIO :: Eff ES a -> IO a
--- evalInIO = runEff . evalJSIO . evalDOM
-
---------------------------------------------------------------------------------
+-- data AppCfg is os model = AppCfg { initialModel' :: model
+--                                  , update'       :: model -> msg
+--                                  }
 
 
---------------------------------------------------------------------------------
+-- -- update' :: model ->
+
+-- data Html' a es
 
 
---------------------------------------------------------------------------------
-
--- type CanSchedule handlerEs = Reader.Reader (Eff handlerEs () -> Eff '[JSIO] ())
-
-
--- data CanSchedule handlerEs :: Effect where
---   SetupEventHandler :: CanSchedule handlerEs m (Eff handlerEs () -> IO ())
-
--- type instance DispatchOf (CanSchedule handlerEs) = Dynamic
-
--- setupEventHandler :: ( CanSchedule handlerEs :> es
---                      , HasCallStack
---                      )
---                   => Eff es (Eff handlerEs () -> Eff '[JSIO] ())
--- setupEventHandler = Reader.ask
-
-
--- withEventSetup :: ( Eff handlerEs () -> IO () )
---                -> Eff handlerEs a
---                -> Eff es a
--- withEventSetup
-
--- schedule ::
-
---   Eff (CanSchedule handlerEs : es) a -> Eff es a
--- schedule = Reader.runReader
-
-
-
--- setupEventHandler = send
-
-
-
--- data CanSchedule handlerEs es where
---   schedule ::
-
-
-
--- onLoad     :: DOM :> es => Eff ES () -> Eff es ()
--- onLoad act = do window <- jsWindow
---                 addEventListener window OnLoad
---                                  (EventListener . const $ evalInIO act)
-
--- onClick    :: DOM :> es => Eff ES () -> Eff es ()
--- onClick act = do document <- jsDocument
---                  addEventListener document OnClick (EventListener . const $ evalInIO act)
-
---------------------------------------------------------------------------------
-
-
-update :: model -> msg -> Eff es model
-update = undefined
-
-
---------------------------------------------------------------------------------
-
-
---------------------------------------------------------------------------------
 
 
 --------------------------------------------------------------------------------
@@ -273,9 +207,6 @@ myUpdate m = \case
 
 
 
-showT :: Show a => a -> Text
-showT = Text.pack . show
-
 
 -- maybe we should actually annotate the entire tree instead ..
 
@@ -341,3 +272,9 @@ main = runEff . runConcurrent . evalJSIO . evalDOM -- $ runApp myApp
           consoleLog "added"
 
 -}
+
+
+--------------------------------------------------------------------------------
+
+showT :: Show a => a -> Text
+showT = Text.pack . show
