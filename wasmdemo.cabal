@@ -17,18 +17,20 @@ common warnings
     ghc-options: -Wall -lwasi-emulated-getpid
 
     build-depends:
-        base               >=4.20.0.0  && < 5
-      , hexpat             >= 0.20.13  && < 0.21
-      , bytestring         >= 0.12     && < 0.13
-      , text               >= 2.1      && < 2.2
-      , effectful          >= 2.5.1    && < 2.6
-      , effectful-core     >= 2.5.1    && < 2.6
-      , containers         >= 0.7      && < 0.9
-      , dependent-map      >= 0.4      && < 0.5
-      , some               >= 1.0.6    && < 1.1
-      , constraints-extras >= 0.4.0.2  && < 0.5
-      , dependent-sum      >= 0.7.2.0  && < 0.8
-      , ghc-experimental   >= 0.1
+        base                     >= 4.20.0.0  && < 5
+      , hexpat                   >= 0.20.13  && < 0.21
+      , bytestring               >= 0.12     && < 0.13
+      , text                     >= 2.1      && < 2.2
+      , effectful                >= 2.5.1    && < 2.6
+      , effectful-core           >= 2.5.1    && < 2.6
+      , containers               >= 0.7      && < 0.9
+      , dependent-map            >= 0.4      && < 0.5
+      , dependent-sum-template   >= 0.2.0.2  && < 0.3
+      , some                     >= 1.0.6    && < 1.1
+      , constraints-extras       >= 0.4.0.2  && < 0.5
+      , dependent-sum            >= 0.7.2.0  && < 0.8
+      , profunctors              >= 5.6.2    && < 5.7
+      , ghc-experimental         >= 0.1
 
          -- >= 9.1201   && < 9.14
 
@@ -51,7 +53,7 @@ common warnings
       , FunctionalDependencies
       , PartialTypeSignatures
       , QuantifiedConstraints
-
+      , DefaultSignatures
 
 -- library
 --     import: warnings
@@ -76,9 +78,11 @@ executable wasmdemo-web
 
     other-modules:
        EffWeb.Html.Event
-       EffWeb.Html.Element
+       -- EffWeb.Html.Element
        EffWeb.Html.Attribute
-       EffWeb.Html EffWeb.Html.Type
+       EffWeb.Html.Attribute.Common
+       EffWeb.Html.Attribute.Global
+       -- EffWeb.Html EffWeb.Html.Type
 
        EffWeb.DOM.Effect
        EffWeb.DOM.FFI
@@ -87,7 +91,9 @@ executable wasmdemo-web
 
        EffWeb.JSIO
 
-       EffWeb.Send
+       EffWeb.Varying
+
+       -- EffWeb.Send
 
 
         -- Attributes

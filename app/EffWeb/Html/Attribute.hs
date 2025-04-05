@@ -1,18 +1,22 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
 module EffWeb.Html.Attribute
   ( HtmlAttribute(..)
-  , Attributes(..)
 
-  , AttrF
+  , AriaAttribute(..)
+
+  , Attributes
+  , Attributes'(..)
   , HtmlAttr
   , attrsFromList
 
 
-  , attrNameOf
   , traverseAttributes_
 
-  , HasTextRender(..)
+  , module EffWeb.Html.Attribute.Common
+  , module EffWeb.Html.Attribute.Global
+  , module EffWeb.Html.Event
 
   , DSum
 
@@ -22,11 +26,13 @@ module EffWeb.Html.Attribute
   , CssClass(..)
   ) where
 
-
+import           Data.Coerce
 import           Data.Constraint.Extras
+import           Data.Profunctor
+import           EffWeb.Varying
 -- import           Data.Dependent.Map (DMap, fromList, singleton, union, unionWithKey)
 import qualified Data.Dependent.Map as DMap
-import           Data.Dependent.Sum (DSum, (==>))
+import           Data.Dependent.Sum (DSum(..), (==>))
 import           Data.Functor.Identity (Identity(..))
 import           Data.GADT.Compare
 import           Data.GADT.Show
@@ -38,177 +44,78 @@ import           GHC.TypeLits
 import           EffWeb.Html.Element (HtmlElement)
 import           EffWeb.DOM.FFI.Raw (HasSetAttributeValue(..))
 
+import           Data.Constraint.Extras.TH (deriveArgDict)
+import           Data.GADT.Compare.TH (deriveGEq,deriveGCompare)
+import           Data.GADT.Show.TH (deriveGShow)
+import           EffWeb.Html.Attribute.Common
+import           EffWeb.Html.Attribute.Global
+import           EffWeb.Html.Event
+
 --------------------------------------------------------------------------------
 
-data NoYes = No | Yes
-  deriving stock (Show,Read,Eq,Ord,Enum)
 
-instance HasSetAttributeValue NoYes where
-  js_setAttribute node attr = js_setAttribute node attr . \case
-    No  -> "no" :: Text
-    Yes -> "yes"
+data AriaAttribute a where
+  Aria :: !Text -> AriaAttribute Text
+  -- TODO
 
--- | Maybe used on all elements
-data HtmlAttribute el a where
-  -- global attributes
-  Accesskey             ::         HtmlAttribute el Text
-  Anchor                ::         HtmlAttribute el Text
-    -- Experimental Non-standard
-  Autocapitalize        ::         HtmlAttribute el Text
-  Autocorrect           ::         HtmlAttribute el Text
-  Autofocus             ::         HtmlAttribute el Text
-  Class                 ::         HtmlAttribute el CssClass
-  Contenteditable       ::         HtmlAttribute el Text
-  XData                 :: Text -> HtmlAttribute el Text
-  Dir                   ::         HtmlAttribute el Text
-  Draggable             ::         HtmlAttribute el Bool
-  Enterkeyhint          ::         HtmlAttribute el Text
-  Exportparts           ::         HtmlAttribute el Text
-  Hidden                ::         HtmlAttribute el Text
-  Id                    ::         HtmlAttribute el HtmlId
-  Inert                 ::         HtmlAttribute el Text
-  Inputmode             ::         HtmlAttribute el Text
-  Is                    ::         HtmlAttribute el Text
-  Itemid                ::         HtmlAttribute el Text
-  Itemprop              ::         HtmlAttribute el Text
-  Itemref               ::         HtmlAttribute el Text
-  Itemscope             ::         HtmlAttribute el Text
-  Itemtype              ::         HtmlAttribute el Text
-  Lang                  ::         HtmlAttribute el Text
-  Nonce                 ::         HtmlAttribute el Text
-  Part                  ::         HtmlAttribute el Text
-  Popover               ::         HtmlAttribute el Text
-  Slot                  ::         HtmlAttribute el Text
-  Spellcheck            ::         HtmlAttribute el Text
-  Style                 ::         HtmlAttribute el CssStyle
-  Tabindex              ::         HtmlAttribute el Text
-  Title                 ::         HtmlAttribute el Text
-  Translate             ::         HtmlAttribute el NoYes
-  Virtualkeyboardpolicy ::         HtmlAttribute el Text
-  -- Experimental
-  Writingsuggestions    ::         HtmlAttribute el Text
-
-  -- specific inputs
+instance HasAttrName (AriaAttribute a) where
+  attrNameOf (Aria t) = "aria-" <> t
 
 
-    -- accept
-    -- autocomplete
-    -- capture
-    -- crossorigin
-    -- dirname
-    -- disabled
-    -- elementtiming
-    -- for
-    -- max
-    -- maxlength
-    -- min
-    -- minlength
-    -- multiple
-    -- pattern
-    -- placeholder
-    -- readonly
-    -- rel
-    -- required
-    -- size
-    -- step
+deriving instance Show a => Show (AriaAttribute a)
+
+deriveGEq      ''AriaAttribute
+deriveGCompare ''AriaAttribute
+deriveGShow    ''AriaAttribute
+deriveArgDict  ''AriaAttribute
+
+
+data HtmlAttribute msg a = GlobalAttribute (GlobalAttribute a)
+                         | AriaAttribute   (AriaAttribute a)
+                         | EventAttribute  (EventAttr msg a)
+                         deriving (Show)
+
+-- | Change the message type
+mapAttr                   :: Functor f
+                          => (msg -> msg')
+                          -> DSum (HtmlAttribute msg) f -> DSum (HtmlAttribute msg') f
+mapAttr f (attr :=> fval) = case attr of
+                              GlobalAttribute a -> GlobalAttribute a          :=> fval
+                              AriaAttribute   a -> AriaAttribute   a          :=> fval
+                              EventAttribute  a -> case mapEvent f (a :=> fval) of
+                                                     a' :=> fval' -> EventAttribute a' :=> fval'
 
 
 
+instance GEq      (HtmlAttribute msg) where geq = defaultGeq
+instance GCompare (HtmlAttribute msg) where
+  gcompare (GlobalAttribute a) (GlobalAttribute a') = gcompare a a'
+  gcompare (GlobalAttribute a) _                    = GLT
 
+  gcompare (AriaAttribute _)   (GlobalAttribute a') = GGT
+  gcompare (AriaAttribute a)   (AriaAttribute a')   = gcompare a a'
+  gcompare (AriaAttribute _)   (EventAttribute _)   = GLT
 
+  gcompare (EventAttribute a)  (EventAttribute a')  = gcompare a a'
+  gcompare (EventAttribute _)  _                    = GGT
 
+-- instance GShow (HtmlAttribute msg) where gshowsPrec = defaultGshowsPrec
 
-deriving stock instance Show (HtmlAttribute el a)
-
-
-instance GShow (HtmlAttribute el) where gshowsPrec = defaultGshowsPrec
-
-instance GEq   (HtmlAttribute el) where geq = defaultGeq
-
-instance GCompare  (HtmlAttribute el) where
-  gcompare _ _ = GGT -- FIXME !!
-
-instance ( c Text
-         , c HtmlId
-         , c CssClass, c CssStyle
-         , c Bool, c NoYes
-         ) => Has c (HtmlAttribute el) where
-  -- has forall (a :: k) r. f a -> (c a => r) -> r
+instance ( Has c GlobalAttribute, Has c AriaAttribute, Has c (EventAttr msg)
+         ) => Has c (HtmlAttribute msg) where
   has a x = case a of
-    Accesskey              -> x
-    Anchor                 -> x
-    Autocapitalize         -> x
-    Autocorrect            -> x
-    Autofocus              -> x
-    Class                  -> x
-    Contenteditable        -> x
-    XData _                -> x
-    Dir                    -> x
-    Draggable              -> x
-    Enterkeyhint           -> x
-    Exportparts            -> x
-    Hidden                 -> x
-    Id                     -> x
-    Inert                  -> x
-    Inputmode              -> x
-    Is                     -> x
-    Itemid                 -> x
-    Itemprop               -> x
-    Itemref                -> x
-    Itemscope              -> x
-    Itemtype               -> x
-    Lang                   -> x
-    Nonce                  -> x
-    Part                   -> x
-    Popover                -> x
-    Slot                   -> x
-    Spellcheck             -> x
-    Style                  -> x
-    Tabindex               -> x
-    Title                  -> x
-    Translate              -> x
-    Virtualkeyboardpolicy  -> x
-    Writingsuggestions     -> x
+    GlobalAttribute ga -> has @c ga x
+    AriaAttribute aa   -> has @c aa x
+    EventAttribute ea  -> has @c ea x
+
+instance HasAttrName (HtmlAttribute msg a) where
+  attrNameOf = \case
+    GlobalAttribute ga -> attrNameOf ga
+    AriaAttribute aa   -> attrNameOf aa
+    EventAttribute ea  -> attrNameOf ea
 
 --------------------------------------------------------------------------------
 
--- | Get the Name of a HtmlAttribute
-attrNameOf :: HtmlAttribute el a -> Text
-attrNameOf = \case
-  Accesskey             -> "accesskey"
-  Anchor                -> "anchor"
-  Autocapitalize        -> "autocapitalize"
-  Autocorrect           -> "autocorrect"
-  Autofocus             -> "autofocus"
-  Class                 -> "class"
-  Contenteditable       -> "contenteditable"
-  XData label           -> "data-" <> label
-  Dir                   -> "dir"
-  Draggable             -> "draggable"
-  Enterkeyhint          -> "enterkeyhint"
-  Exportparts           -> "exportparts"
-  Hidden                -> "hidden"
-  Id                    -> "id"
-  Inert                 -> "inert"
-  Inputmode             -> "inputmode"
-  Is                    -> "is"
-  Itemid                -> "itemid"
-  Itemprop              -> "itemprop"
-  Itemref               -> "itemref"
-  Itemscope             -> "itemscope"
-  Itemtype              -> "itemtype"
-  Lang                  -> "lang"
-  Nonce                 -> "nonce"
-  Part                  -> "part"
-  Popover               -> "popover"
-  Slot                  -> "slot"
-  Spellcheck            -> "spellcheck"
-  Style                 -> "style"
-  Tabindex              -> "tabindex"
-  Title                 -> "title"
-  Translate             -> "translate"
-  Virtualkeyboardpolicy -> "virtualkeyboardpolicy"
-  Writingsuggestions    -> "writingsuggestions"
 
 
 -- --------------------------------------------------------------------------------
@@ -234,38 +141,31 @@ attrNameOf = \case
 
 -- --------------------------------------------------------------------------------
 
--- data AttributeKind a = Global   (GlobalAttribute a)
---                      | Specific (SpecificAttribute a)
---                      deriving (Show)
+newtype Attributes model msg = Attributes' (Varying model) msg
 
--- instance GShow    AttributeKind where gshowsPrec = showsPrec
--- instance GEq      AttributeKind where geq = defaultGeq
--- instance GCompare AttributeKind where
---   gcompare (Global g)   (Global g')   = gcompare g g'
---   gcompare (Global g)   (Specific g') = GLT
---   gcompare (Specific g) (Specific g') = gcompare g g'
---   gcompare (Specific g) (Global g')   = GGT
+newtype AttributesF f msg = Attributes (DMap.DMap (HtmlAttribute msg) f)
 
--- instance (Has c GlobalAttribute, Has c SpecificAttribute) => Has c AttributeKind where
---   -- has forall (a :: k) r. f a -> (c a => r) -> r
---   has a x = case a of
---     Global   a' -> has @c a' x
---     Specific a' -> has @c a' x
+instance Functor f => Functor (Attributes' f) where
+  fmap f (Attributes m) = Attributes . DMap.fromAscList . fmap (mapAttr f) . DMap.toAscList $ m
+    -- note that changing the message type cannot change the ordering of the key types; as
+    -- e.g. we cannot change from something like an 'EventAttribute OnPause' attribute to
+    -- a GlobalAttribute or so. Hence the ordering does not change
+
+-- instance Profunctor Attributes where
+
+--   dimap f g = fmap (dimap f g)
 
 
---------------------------------------------------------------------------------
 
-newtype Attributes el = Attributes (DMap.DMap (HtmlAttribute el) Identity)
-  deriving (Show)
+  -- (Attributes m) = Attributes
 
 
-type AttrF el'   = DSum el' Identity
+  -- rmap = fmap
 
-type HtmlAttr el = AttrF (HtmlAttribute el)
+type HtmlAttr model msg = DSum (HtmlAttribute msg) (Varying model)
 
-attrsFromList :: [HtmlAttr el] -> Attributes el
+attrsFromList :: [HtmlAttr model msg] -> Attributes model msg
 attrsFromList = Attributes . DMap.fromList
-
 
 class HasJSFFI a where
 instance HasJSFFI Int
@@ -277,46 +177,23 @@ instance HasJSFFI Bool
 
 
 -- class JSSerializable el a where
---   serializeJS :: HtmlAttribute el a -> JSSerialized a
+--   serializeJS :: GlobalAttribute el a -> JSSerialized a
 
 
-
-class HasTextRender a where
-  renderAsText :: a -> Text
-
-instance HasTextRender a => HasTextRender (Identity a) where
-  renderAsText (Identity x) = renderAsText x
-instance HasTextRender Text where
-  renderAsText = id
-
--- | Traversa over the attributes
-traverseAttributes_                  :: ( Applicative t
-                                        )
-                                     => (forall a. HtmlAttribute el a -> a -> t ())
-                                     -> Attributes el -> t ()
-traverseAttributes_ f (Attributes m) = DMap.traverseWithKey_ (\attr (Identity x) -> f attr x) m
-
-
-newtype HtmlId = HtmlId Text
-  deriving stock (Show,Eq,Ord)
-  deriving newtype (IsString, HasTextRender,HasSetAttributeValue)
-
-
--- type family AttributeValue (attr :: AttributeKind) :: Type
-
--- type instance AttributeValue (Global Id)    = HtmlId
--- type instance AttributeValue (Global Title) = Text
-
+-- | Traversal over the attributes
+traverseAttributes_                       :: forall model msg t. Applicative t
+                                          => model
+                                          -> (forall a. HtmlAttribute msg a -> a -> t ())
+                                          -> Attributes model msg -> t ()
+traverseAttributes_ input f (Attributes m) = DMap.traverseWithKey_ ff m
+  where
+    ff      :: HtmlAttribute msg a -> Varying model a -> t ()
+    ff attr = \case
+      Constant x -> f attr x
+      Varying g  -> f attr (g input)
 
 --------------------------------------------------------------------------------
 
-newtype CssClass = CssClass Text
-  deriving stock (Show,Eq,Ord)
-  deriving newtype (IsString, HasTextRender,HasSetAttributeValue)
-
-
--- data Style = Style
-
-newtype CssStyle = CssStyle Text
-  deriving stock (Show,Eq,Ord)
-  deriving newtype (IsString, HasTextRender,HasSetAttributeValue)
+newtype Source = Source Text
+  deriving stock (Show,Eq)
+  deriving newtype (IsString)

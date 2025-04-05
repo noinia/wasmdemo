@@ -61,6 +61,12 @@ p = htmlElement @P P
 h1 :: [Attr H1 msg] -> [Html () msg] -> Html () msg
 h1 = htmlElement @H1 H1
 
+script :: [Attr Script msg] -> [Html () msg] -> Html () msg
+script = htmlElement @Script Script
+
+-- scriptSrc     :: Source -> Html () msg
+-- scriptSrc src = script [Src =: src] []
+
 --------------------------------------------------------------------------------
 -- * Convenience functions
 

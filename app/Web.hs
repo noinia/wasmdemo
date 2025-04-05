@@ -2,7 +2,7 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 module Main where
 
-import           Control.Monad (void)
+import           Control.Monad (void, (=<<))
 import           Data.Bifoldable
 import           Data.Bifunctor
 import           Data.Bitraversable
@@ -14,6 +14,7 @@ import           Data.Functor.Identity (Identity(..))
 import           Data.Kind (Type)
 import           Data.Map (Map)
 import qualified Data.Map as Map
+import           Data.Profunctor
 import           Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import           Data.String (IsString(..))
@@ -24,14 +25,9 @@ import           EffWeb.DOM.Effect
 import           EffWeb.DOM.FFI
 import           EffWeb.DOM.FFI.Raw (HasSetAttributeValue(..))
 import           EffWeb.DOM.FFI.Types
-import           EffWeb.Html
-import           EffWeb.Html.Type
 import           EffWeb.Html.Attribute
-import qualified EffWeb.Html.Attribute as A
-import           EffWeb.Html.Element
-import           EffWeb.Html.Event
 import           EffWeb.JSIO
-import           EffWeb.Send
+import           EffWeb.Varying
 import           Effectful
 import           Effectful.Concurrent.STM
 import           Effectful.Dispatch.Dynamic
@@ -49,200 +45,168 @@ import           Prelude hiding (div)
 foreign export javascript "hs_start"
   main :: IO ()
 
-
 --------------------------------------------------------------------------------
 
--- data AppCfg is os model = AppCfg { initialModel' :: model
---                                  , update'       :: model -> msg
---                                  }
-
-
--- -- update' :: model ->
-
--- data Html' a es
-
-
+main :: IO ()
+main = print "woei"
 
 
 --------------------------------------------------------------------------------
 
-type View msg = Html () msg
-
-data App handlerEs msg model =
-  App { appInitialModel  :: model
-      -- , appUpdate        :: model -> msg -> Eff es model
-      , appUpdate        :: model -> msg -> Eff handlerEs model
-      , appRenderView    :: model -> View msg
-      , appInitialAction :: Maybe msg
-      }
-
-
-type SyncES msg = [Send msg, JSIO, Concurrent, IOE]
-
-runApp     :: forall handlerEs es msg model.
-              ( Concurrent :> es
-              , DOM        :> es
-              , JSIO       :> es
-
-              , IOE        :> es  -- we should avoid this one ...
-              , Subset handlerEs es
-
-
-
-              -- , JSIO       :> es
-              -- , Concurrent :> handlerEs
-
-              -- , IOE        :> es
-
-              -- , IOE        :> handlerEs
-                -- handlerEs ~ [Send msg, DOM, Concurrent, JSIO]
-              -- , handlerEs ~ [Send msg, DOM, JSIO, Concurrent, IOE]
-              -- , es
-              )
-           => App handlerEs msg model -> Eff es ()
-runApp app@(App { appUpdate        = updateHandler
-                , appRenderView    = renderView
-                }
-           ) = do
-                 queue <- atomically $ do q <- newTBQueue queueSize
-                                          for_ (appInitialAction app) $ writeTBQueue q
-                                          pure q
-
-                 body     <- jsBody
-                 startApp queue body
-
-  where
-    startApp            :: TBQueue msg -> Body -> Eff es ()
-    startApp queue body = do
-                            htmlTree <- runReader runner $
-                              createHtml @(SyncES msg) body $ renderView (appInitialModel app)
-                            handle htmlTree (appInitialModel app)
-      where
-        handle                :: Html Element msg -> model -> Eff es ()
-        handle htmlTree model = do msg    <- atomically $ readTBQueue queue
-                                   model' <- runInEff $ updateHandler model msg
-                                   handle htmlTree model'
-                                   -- we may wish to diff the tree
-
-        runInEff :: Eff handlerEs a -> Eff es a
-        runInEff = inject
-          -- . runSendWith queue
-
-        runner :: EventHandlerRunner (SyncES msg)
-        runner = runEff
-               . runConcurrent
-               . evalJSIO
-               -- . evalDOM
-               . runSendWith queue
-
-
--- runSendWith queue
---                    . Reader.runReader runner
---                    .
-
-
-
-
-  -- do
-  --              body   <- jsBody
-  --              tr <- createHtml body (myUI myModel)
-
-
-queueSize = 1000
-
-
---------------------------------------------------------------------------------
-
-data MyModel = MyModel { modelText :: Text }
+data HtmlElem = Div | P
   deriving (Show,Eq)
 
+-- data Attr msg = OnClick' msg
+--               | Class' Text
+--               deriving (Show,Eq,Functor)
+
+data HtmlBody f ref msg = TextNode ref (f Text)
+                        | ElemNode {-#UNPACK #-}!HtmlElem
+                                   ref
+                                   (Attributes' f msg)
+                                   (Seq.Seq     (f (HtmlBody f ref msg)))
+                      -- deriving stock (Show,Eq,Functor)
+
+instance Functor f => Functor (HtmlBody f ref) where
+  fmap f = \case
+    TextNode ref ft         -> TextNode ref ft
+    ElemNode el ref ats chs -> ElemNode el ref (fmap f ats) (fmap (fmap (fmap f)) chs)
+
+--------------------------------------------------------------------------------
+
+----------------------------------------
+
+
+newtype View' ref model msg = View { unView :: Varying model (HtmlBody (Varying model) ref msg) }
+  deriving stock (Functor)
+
+
+
+
+type View = View' ()
+
+instance Profunctor (View' ref) where
+  dimap f g (View x) = View (dimap f (fmap g) x)
+  rmap = fmap
+
+
+--------------------------------------------------------------------------------
+
+dynText :: Varying model Text -> View model msg
+dynText = View . TextNode ()
+
+textNode :: (model -> Text) -> View model msg
+textNode = dynText . Varying
+
+staticText :: Text -> View model msg
+staticText = View . TextNode mempty . pure
+
+----------------------------------------
+
+createHtmlElement              :: HtmlElem
+                               -> Varying model (Attributes model msg)
+                               -> Varying model (Seq.Seq (View model msg))
+                               -> View model msg
+createHtmlElement el mats mchs = View $ ElemNode el mempty <$> mats <*> mchs
+
+
+  -- do atrs <- mats
+  --                                          chs  <-
+  --                                          pure $ ElemNode el mempty atrs chs
+
+{-
+
+dynHtmlElment            :: HtmlElem
+                         -> Varying model [Varying model (HtmlAttribute msg)]
+                         -> Varying model [View model msg]
+                         -> View model msg
+dynHtmlElment el ats chs = createHtmlElement el ats (Seq.fromList <$> chs)
+
+htmlElement            :: HtmlElem
+                       -> [Varying model (Attr msg)] -> [View model msg]
+                       -> View model msg
+htmlElement el ats chs = View $
+    ElemNode el mempty <$> sequence ats <*> (Seq.fromList <$> traverse unView chs)
+
+div :: [Varying model (Attr msg)] -> [View model msg] -> View model msg
+div = htmlElement Div
+
+p :: [Varying model (Attr msg)] -> [View model msg] -> View model msg
+p = htmlElement P
+
+  -- $ Memo shouldRecompute renderElem
+  -- where
+  --   renderElem model =
+  --                      $ ElemNode el []
+-}
+
+--------------------------------------------------------------------------------
+
+-- data Attr msg
+
+class CreateStaticAttr attr where
+  -- | Create a static attribute
+  (=:) :: attr value     -> value -> DSum (HtmlAttribute msg) Identity
+class CreateMessageAttr attr msg where
+  -- | Create a message attribute
+  (-:) :: attr value -> value -> DSum (HtmlAttribute msg) Identity
+
+infixr 1 =:, -:
+
+instance CreateStaticAttr GlobalAttribute where
+  attr =: value = (GlobalAttribute attr) DSum.:=> Identity value
+instance CreateStaticAttr AriaAttribute where
+  attr =: value = (AriaAttribute attr) DSum.:=> Identity value
+
+-- instance CreateStaticAttr (HtmlAttribute msg) where
+--   attr =: value = attr DSum.:=> Identity value
+
+instance CreateMessageAttr (EventAttr msg) msg where
+  attr -: value = (EventAttribute attr) DSum.:=> Identity value
+
+-- instance CreateMessageAttr (HtmlAttribute msg) a where
+--   attr -: value = attr DSum.:=> Identity value
+
+--------------------------------------------------------------------------------
+
+data MyModel = MyModel { myBooleanValue :: Bool
+                       , modelText ::      Text
+                       }
+  deriving stock (Show,Eq)
+
 myModel :: MyModel
-myModel = MyModel "initial model"
+myModel = MyModel False "initial model"
 
 data MyMsg = HasBeenClicked
            | SetMsg Text
            | MyInitialAction
 
-myApp :: ( JSIO :> es
-         ) => App es MyMsg MyModel
-myApp = App { appInitialModel  = myModel
-            , appInitialAction = Just MyInitialAction
-            , appUpdate        = myUpdate
-            , appRenderView    = myUI
-            }
 
-
-myUpdate   :: ( JSIO :> es
-              ) => MyModel -> MyMsg -> Eff es MyModel
-myUpdate m = \case
-    HasBeenClicked  -> do consoleLog "hasbeen clicked :)"
-                          pure m
-    SetMsg t        -> do consoleLog "setting msg"
-                          pure $ MyModel t
-    MyInitialAction -> do consoleLog "initial Action"
-                          pure m
-
---------------------------------------------------------------------------------
-
--- newtype AttributeValue = AttributeValue Text
---   deriving stock (Show,Eq,Ord)
---   deriving newtype (IsString)
-
-
--- newtype AttrKey = AttrKey Text
---   deriving stock (Show,Eq,Ord)
---   deriving newtype (IsString)
-
--- type Attributes = DMap AttributeValue
-
--- data HtmlIx = TextIx | NodeIx [HtmlIx]
-
-
--- schedule     :: msg -> Eff ES ()
--- schedule msg = consoleLog "schedule"
-
-  -- do m' <- myUpdate (MyModel "dummy") msg
-  --                 consoleLog $ "result from update" <> showT m'
+{-
 
 
 
 
-
--- maybe we should actually annotate the entire tree instead ..
-
---------------------------------------------------------------------------------
-
-myUI   :: MyModel -> Html () MyMsg
-myUI m = div []
-             [ h1  [ Class   := classes ["header", "someclass"]
-                   , OnClick :- HasBeenClicked
-                   , Id      := "theHeader"
-                   ]
-                   [ textNode "header!"
-                   ]
-             , div [] [p [ OnClick     :- SetMsg "woei"
-                         , XData "foo" := "bar"
-                         , A.Style     := "border: 1px solid black; width: 200px; height: 100px;"
-                         , OnMouseOver :- SetMsg "hovering"
-                         ]
-                         [ textNode $ modelText m
-                         ]
-                      ]
-             ]
+myUI :: View MyModel MyMsg
+myUI = div []
+           [ h1  [ Class   =: classes ["header", "someclass"]
+                 , OnClick -: HasBeenClicked
+                 , Id      =: "theHeader"
+                 ]
+                 [ staticText "header!"
+                 ]
+           , div [] [p [ OnClick     -: SetMsg "woei"
+                       , XData "foo" =: "bar"
+                       , A.Style     =: "border: 1px solid black; width: 200px; height: 100px;"
+                       , OnMouseOver -: SetMsg "hovering"
+                       ]
+                       [ textNode modelText
+                       ]
+                    ]
+           ]
 
 
-
-
-
---------------------------------------------------------------------------------
-
-main :: IO ()
-main = runEff . runConcurrent . evalJSIO . evalDOM -- $ runApp myApp
-     $ main'
-  where
-    main' :: Eff [DOM, JSIO, Concurrent, IOE] ()
-    main' = runApp @[JSIO, IOE] myApp
-
+-}
 
 {-
 

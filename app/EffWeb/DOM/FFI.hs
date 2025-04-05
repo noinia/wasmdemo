@@ -94,13 +94,13 @@ type EventHandlerRunner handlerEs = Eff handlerEs () -> IO ()
 type CanRunHandler handlerEs = Reader (EventHandlerRunner handlerEs)
 
 -- | Add an Event Listener.
-addEventListener                           :: forall handlerEs es eventTarget.
+addEventListener                           :: forall handlerEs es eventTarget msg a.
                                               ( IsEventTarget eventTarget
                                               , DOM                     :> es
                                               , CanRunHandler handlerEs :> es
                                               )
                                            => eventTarget
-                                           -> EventAttr
+                                           -> EventAttr msg a
                                            -> (Event -> Eff handlerEs ())
                                            -> Eff es ()
 addEventListener target eventType listener = do
