@@ -27,11 +27,11 @@ import           EffWeb.DOM.FFI
 import           EffWeb.DOM.FFI.Raw (HasSetAttributeValue(..))
 import           EffWeb.DOM.FFI.Types
 import           EffWeb.Html.Attribute
+import           EffWeb.Html.Element
 import           EffWeb.JSIO
 import           EffWeb.Varying
 import           Effectful
 import           Effectful.Concurrent.STM
-import           Effectful.Reader.Static
 import           Effectful.Dispatch.Dynamic
 import qualified Effectful.Dispatch.Dynamic as Eff
 import           Effectful.Dispatch.Static
@@ -58,20 +58,8 @@ main = runEff . evalJSIO . evalDOM $ do
 
 --------------------------------------------------------------------------------
 
-data HtmlElem = Div | P | H1
-  deriving (Show,Eq)
-
-elementNameOf = \case
-  Div -> "div"
-  P -> "p"
-  H1 -> "h1"
-
--- data Attr msg = OnClick' msg
---               | Class' Text
---               deriving (Show,Eq,Functor)
-
 data HtmlBody f ref msg = TextNode ref (f Text)
-                        | ElemNode {-#UNPACK #-}!HtmlElem
+                        | ElemNode {-#UNPACK #-}!HtmlElement
                                    ref
                                    (AttributesF f msg)
                                    (Seq.Seq     (f (HtmlBody f ref msg)))
@@ -129,14 +117,14 @@ staticText = View . pure . TextNode mempty . pure
 
 -- | The most generic version of create htmlElement, that allows us to change
 -- which attributes and which children exist over time.
-createHtmlElement              :: HtmlElem
+createHtmlElement              :: HtmlElement
                                -> Varying model (Attributes model msg)
                                -> Varying model (Seq.Seq (View model msg))
                                -> View model msg
 createHtmlElement el mats mchs = View $ ElemNode el mempty <$> coerce mats <*> coerce mchs
 
 -- | More or less the same as createHtmlElement, but in an easier to use form.
-dynHtmlElement            :: HtmlElem
+dynHtmlElement            :: HtmlElement
                           -> Varying model [Attr model msg]
                           -> Varying model [View model msg]
                           -> View model msg
@@ -144,7 +132,7 @@ dynHtmlElement el ats chs = createHtmlElement el (attrsFromList <$> ats) (Seq.fr
 
 -- | Create a html element with a fixed set of attributes, and a fixed set of children,
 -- however those attributes/children themselves may vary over time.
-htmlElement            :: HtmlElem -> [Attr model msg] -> [View model msg] -> View model msg
+htmlElement            :: HtmlElement -> [Attr model msg] -> [View model msg] -> View model msg
 htmlElement el ats chs = dynHtmlElement el (pure ats) (pure chs)
 
 div :: [Attr model msg] -> [View model msg] -> View model msg
@@ -241,21 +229,15 @@ data ShouldRender = NoUpdate | Create | Update Element
 
 -- | Test whether we should (re)render the
 shouldRender     :: RenderState model -> Varying model' a -> ShouldRender
-shouldRender _ _ = Create
+shouldRender rs v = case elemRef rs of
+                      Nothing  -> Create
+                      Just ref -> case v of
+                        Constant _ -> NoUpdate
+                        Varying _  -> Update ref
 
 
--- sho              :: RenderState model
---                            -> Bool
--- shouldRender'
-
--- shouldRender'              :: RenderState model
---                            -> AttributesF (Varying model') msg
---                            -> Seq.Seq     (Varying model'' (HtmlBody (Varying model''') ref msg))
---                            -> Bool
--- shouldRender' rs attrs chs =
-
---   = isNothing . elemRef
-
+-- | Acquires the model meeded for a 'varying' from the context. Returns the model if
+-- used.
 acquire :: Reader model :> es => Varying model a -> Eff es (a, Maybe model)
 acquire = \case
   Constant x -> pure (x, Nothing)
@@ -271,6 +253,7 @@ createVaryingWith f = \case
                    pure $ Varying $ \input -> res
                    -- not sure if this is correct now
 
+
 createHtmlVarying       :: ( IsNode root
                            , DOM :> es
                            , Reader model :> es
@@ -281,22 +264,18 @@ createHtmlVarying       :: ( IsNode root
 createHtmlVarying parent = createVaryingWith (createHtml' parent)
 
 
-  -- \case
-  -- Constant html -> Constant <$> createHtml' parent html
-  -- Varying fHtml -> do html  <- asks fHtml
-  --                     Varying <$> createHtml' parent html
 
-
-
-renderView                  :: ( IsNode root
-                               , DOM :> es
-                               , Reader model :> es
-                               )
-                            => root -> View model msg -> Eff es (View' (RenderState model) model msg)
+-- | Renders a view
+renderView        :: ( IsNode root
+                     , DOM :> es
+                     , Reader model :> es
+                     )
+                  => root -> View' ref model msg -> Eff es (View' (RenderState model) model msg)
 renderView root v = let View var = mapRef (const initialState) v
                     in View <$> createHtmlVarying root var
 
 
+-- | Creates the html tree
 createHtml'             :: forall root model msg es.
                            ( IsNode root
                            , DOM :> es
@@ -348,34 +327,6 @@ createHtml' parent body = case body of
 
 
 
-
--- createHtmlBody        :: forall root es ref model msg.
---                          ( IsNode root
---                          , DOM  :> es
---                          , JSIO :> es
---                          )
---                       => root
---                       -> View' (Maybe Element) model msg -> Eff es (View' Element model msg)
--- createHtmlBody parent = case unView vTree of
---     Constant tr -> createConstant tr
---     Varying vt  -> undefined
---   where
---     createConstant = \case
-
-
-
---   traverse (go parent)
---   where
---     go :: root -> View' ref model msg ->
---     TextNode _ vtext ->
-
-
-
-
-
-
-
--- vTree =
 
 
 

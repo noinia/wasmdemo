@@ -99,7 +99,8 @@ data HtmlElement = A
                  | Source
                  | Span
                  | Strong
-                 | Style
+                 | StyleElem
+                   -- this has a non-standard name to avoid conflciting with the style elem
                  | Sub
                  | Summary
                  | Sup
@@ -214,7 +215,7 @@ elementNameOf = ElementName . \case
   Source      -> "source"
   Span        -> "span"
   Strong      -> "strong"
-  Style       -> "style"
+  StyleElem   -> "style"
   Sub         -> "sub"
   Summary     -> "summary"
   Sup         -> "sup"

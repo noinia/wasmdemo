@@ -78,7 +78,7 @@ executable wasmdemo-web
 
     other-modules:
        EffWeb.Html.Event
-       -- EffWeb.Html.Element
+       EffWeb.Html.Element
        EffWeb.Html.Attribute
        EffWeb.Html.Attribute.Common
        EffWeb.Html.Attribute.Global
