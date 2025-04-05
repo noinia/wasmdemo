@@ -12,6 +12,7 @@ module EffWeb.Html.Attribute
   , attrsFromList
 
 
+  , foldAttributes
   , traverseAttributes_
 
   , module EffWeb.Html.Attribute.Common
@@ -187,6 +188,19 @@ instance HasJSFFI Bool
 
 -- class JSSerializable el a where
 --   serializeJS :: GlobalAttribute el a -> JSSerialized a
+
+-- traverseAttributes               :: forall model msg t b. Applicative t
+--                                  => model
+--                                  -> (forall a. HtmlAttribute msg a -> a -> t b)
+--                                  -> Attributes model msg -> t b
+-- traverseAttributes input f (Attributes (AttributesF m)) = DMap.traverseWithKey ff m
+--   where
+--     ff      :: HtmlAttribute msg a -> Varying model a -> t b
+--     ff attr = \case
+--       Constant x -> f attr x
+--       Varying g  -> f attr (g input)
+
+foldAttributes = undefined
 
 
 -- | Traversal over the attributes

@@ -16,6 +16,7 @@ data Varying input a = Constant a
                      --           (input -> a)
                      deriving stock (Functor)
 
+
 instance Applicative (Varying input) where
   pure = Constant
   (Constant f) <*> (Constant x) = Constant $ f x
@@ -38,6 +39,17 @@ instance Profunctor Varying where
     Constant x -> Constant (g x)
     Varying  h -> Varying  (g . h . f)
   rmap = fmap
+
+-- instance Foldable (Varying input) where
+--   foldMap = foldMapDefault
+
+-- instance Traversable (Varying input) where
+--   -- :: (a -> f b)  -> f (Varying input b)
+--   traverse f = \case
+--     Constant x -> Constant <$> f x
+--     Varying k  -> Varying <$> traverse f k
+
+-- traverseWith :: Applicative f => input -> (a -> f b) -> Varying input a -> f b
 
 
 --------------------------------------------------------------------------------

@@ -14,6 +14,7 @@ import           Data.Functor.Identity (Identity(..))
 import           Data.Kind (Type)
 import           Data.Map (Map)
 import qualified Data.Map as Map
+import           Data.Monoid (First(..))
 import           Data.Profunctor
 import           Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
@@ -30,6 +31,7 @@ import           EffWeb.JSIO
 import           EffWeb.Varying
 import           Effectful
 import           Effectful.Concurrent.STM
+import           Effectful.Reader.Static
 import           Effectful.Dispatch.Dynamic
 import qualified Effectful.Dispatch.Dynamic as Eff
 import           Effectful.Dispatch.Static
@@ -48,13 +50,21 @@ foreign export javascript "hs_start"
 --------------------------------------------------------------------------------
 
 main :: IO ()
-main = print "woei"
+main = runEff . evalJSIO . evalDOM $ do
+         body <- jsBody
+         _    <- runReader myModel $ renderView body myUI
+         pure ()
 
 
 --------------------------------------------------------------------------------
 
 data HtmlElem = Div | P | H1
   deriving (Show,Eq)
+
+elementNameOf = \case
+  Div -> "div"
+  P -> "p"
+  H1 -> "h1"
 
 -- data Attr msg = OnClick' msg
 --               | Class' Text
@@ -72,6 +82,12 @@ instance Functor f => Functor (HtmlBody f ref) where
     TextNode ref ft         -> TextNode ref ft
     ElemNode el ref ats chs -> ElemNode el ref (fmap f ats) (fmap (fmap (fmap f)) chs)
 
+instance Functor f => Bifunctor (HtmlBody f) where
+  bimap f g = \case
+    TextNode ref ft         -> TextNode (f ref) ft
+    ElemNode el ref ats chs -> ElemNode el (f ref) (fmap g ats) (fmap (fmap (bimap f g)) chs)
+
+
 --------------------------------------------------------------------------------
 
 ----------------------------------------
@@ -80,8 +96,8 @@ instance Functor f => Functor (HtmlBody f ref) where
 newtype View' ref model msg = View { unView :: Varying model (HtmlBody (Varying model) ref msg) }
   deriving stock (Functor)
 
-
-
+mapRef            :: (ref -> ref') -> View' ref model msg -> View' ref' model msg
+mapRef f (View v) = View . fmap (first f) $ v
 
 type View = View' ()
 
@@ -208,6 +224,184 @@ myUI = div []
                     ]
            ]
 
+
+data RenderState model = RenderState { elemRef  :: Maybe Element
+                                       -- should this be a HKD so we can guarantee there is
+                                       -- an elem?
+                                     , oldModel :: Maybe model
+                                     -- ^ model used at the time of construction (if relevant)
+                                     }
+
+initialState :: RenderState model
+initialState = RenderState Nothing Nothing
+
+
+
+data ShouldRender = NoUpdate | Create | Update Element
+
+-- | Test whether we should (re)render the
+shouldRender     :: RenderState model -> Varying model' a -> ShouldRender
+shouldRender _ _ = Create
+
+
+-- sho              :: RenderState model
+--                            -> Bool
+-- shouldRender'
+
+-- shouldRender'              :: RenderState model
+--                            -> AttributesF (Varying model') msg
+--                            -> Seq.Seq     (Varying model'' (HtmlBody (Varying model''') ref msg))
+--                            -> Bool
+-- shouldRender' rs attrs chs =
+
+--   = isNothing . elemRef
+
+acquire :: Reader model :> es => Varying model a -> Eff es (a, Maybe model)
+acquire = \case
+  Constant x -> pure (x, Nothing)
+  Varying f  -> (\model -> (f model, Just model)) <$> ask
+
+createVaryingWith   :: (Reader model :> es)
+                    => (a -> Eff es b)
+                    -> Varying model a -> Eff es (Varying model b)
+createVaryingWith f = \case
+  Constant x -> Constant <$> f x
+  Varying g  -> do x   <- asks g
+                   res <- f x
+                   pure $ Varying $ \input -> res
+                   -- not sure if this is correct now
+
+createHtmlVarying       :: ( IsNode root
+                           , DOM :> es
+                           , Reader model :> es
+                           )
+                        => root
+                        -> Varying model (HtmlBody (Varying model) (RenderState model) msg)
+                        -> Eff es (Varying model (HtmlBody (Varying model) (RenderState model) msg))
+createHtmlVarying parent = createVaryingWith (createHtml' parent)
+
+
+  -- \case
+  -- Constant html -> Constant <$> createHtml' parent html
+  -- Varying fHtml -> do html  <- asks fHtml
+  --                     Varying <$> createHtml' parent html
+
+
+
+renderView                  :: ( IsNode root
+                               , DOM :> es
+                               , Reader model :> es
+                               )
+                            => root -> View model msg -> Eff es (View' (RenderState model) model msg)
+renderView root v = let View var = mapRef (const initialState) v
+                    in View <$> createHtmlVarying root var
+
+
+createHtml'             :: forall root model msg es.
+                           ( IsNode root
+                           , DOM :> es
+                           , Reader model :> es
+                           )
+                        => root
+                        -> HtmlBody (Varying model) (RenderState model) msg
+                        -> Eff es (HtmlBody (Varying model) (RenderState model) msg)
+createHtml' parent body = case body of
+    TextNode rs vText -> case shouldRender rs vText of
+      NoUpdate       -> pure body
+      Create         -> do (text, mModel) <- acquire vText
+                           textRef <- coerce <$> createTextNode text
+                           appendChild parent textRef
+                           pure $ TextNode (rs { elemRef  = Just textRef
+                                               , oldModel = mModel
+                                               }
+                                           ) vText
+      Update textRef -> do (text, mModel) <- acquire vText
+                           -- TODO: set the text
+                           pure $ TextNode (rs { oldModel = mModel} ) vText
+    ElemNode el rs attrs chs -> case elemRef rs of
+      Nothing       -> do elRef <- createElement (elementNameOf el)
+                          appendChild parent elRef
+                          -- create the attributes
+
+                          model <- ask -- TODO fix
+                          traverseAttributes_ model (setAttribute' elRef) (Attributes attrs)
+                          chs'      <- traverse (createHtmlVarying elRef) chs
+                            -- TODO: maintain whether we access the model or not
+                          let mModel = Just model
+                            -- First mModel = attrModel -- <> chsModel
+                              -- figure out whether this subtree actually needed the model.
+                          pure $ ElemNode el (rs { elemRef  = Just elRef
+                                                 , oldModel = mModel
+                                                 }
+                                             ) attrs chs'
+      Just elRef    -> pure body -- FIXME  -- maybe update
+  where
+    setAttribute'                   :: Element -> HtmlAttribute msg v -> v
+                                    -> Eff es ()
+    setAttribute' elRef attr value = pure ()
+      -- has @HasSetAttributeValue attr setAttribute elRef attr value
+
+      -- do
+      --     (value, _) <- acquire vValue
+      --     has @HasSetAttributeValue attr setAttribute elRef attr value
+      --     -- pure $ First mModel
+
+
+
+
+-- createHtmlBody        :: forall root es ref model msg.
+--                          ( IsNode root
+--                          , DOM  :> es
+--                          , JSIO :> es
+--                          )
+--                       => root
+--                       -> View' (Maybe Element) model msg -> Eff es (View' Element model msg)
+-- createHtmlBody parent = case unView vTree of
+--     Constant tr -> createConstant tr
+--     Varying vt  -> undefined
+--   where
+--     createConstant = \case
+
+
+
+--   traverse (go parent)
+--   where
+--     go :: root -> View' ref model msg ->
+--     TextNode _ vtext ->
+
+
+
+
+
+
+
+-- vTree =
+
+
+
+
+
+--   = \case
+--     TextNode _ vtext ->
+
+
+
+    -- text              -> do txtRef <- createTextNode text
+    --                                    appendChild parent txtRef
+    --                                    pure $ TextNode (coerce txtRef) text  -- TODO
+    -- HtmlNode el _ evts attrs chs -> do elRef <- createElement (elementNameOf el)
+    --                                    appendChild parent elRef
+    --                                    -- set attrs
+    --                                    -- setAttribute elRef Id "foo"
+    --                                    -- traverseAttributes_ (\attr value ->
+    --                                    --   has @HasSetAttributeValue attr
+    --                                    --      setAttribute elRef attr value) attrs
+
+    --                                    -- register event handles
+    --                                    registerEventHandles handler elRef evts
+
+    --                                    chs' <- traverse (createHtml @handlerEs elRef) chs
+    --                                    pure $ HtmlNode el elRef evts attrs chs'
 
 
 
