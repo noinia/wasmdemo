@@ -6,8 +6,8 @@ module EffWeb.Html.Attribute
 
   , AriaAttribute(..)
 
-  , Attributes
-  , Attributes'(..)
+  , Attributes(..)
+  , AttributesF(..)
   , HtmlAttr
   , attrsFromList
 
@@ -85,7 +85,15 @@ mapAttr f (attr :=> fval) = case attr of
                               EventAttribute  a -> case mapEvent f (a :=> fval) of
                                                      a' :=> fval' -> EventAttribute a' :=> fval'
 
-
+mapAttrWith               :: Functor f
+                          => (forall v. f v -> g v)
+                          -> (msg -> msg')
+                          -> DSum (HtmlAttribute msg) f -> DSum (HtmlAttribute msg') g
+mapAttrWith ff f (attr :=> fval) = case attr of
+    GlobalAttribute a -> GlobalAttribute a          :=> ff fval
+    AriaAttribute   a -> AriaAttribute   a          :=> ff fval
+    EventAttribute  a -> case mapEvent f (a :=> fval) of
+                           a' :=> fval' -> EventAttribute a' :=> ff fval'
 
 instance GEq      (HtmlAttribute msg) where geq = defaultGeq
 instance GCompare (HtmlAttribute msg) where
@@ -141,31 +149,31 @@ instance HasAttrName (HtmlAttribute msg a) where
 
 -- --------------------------------------------------------------------------------
 
-newtype Attributes model msg = Attributes' (Varying model) msg
+newtype Attributes model msg = Attributes (AttributesF (Varying model) msg)
+  deriving newtype (Functor)
 
-newtype AttributesF f msg = Attributes (DMap.DMap (HtmlAttribute msg) f)
+newtype AttributesF f msg = AttributesF (DMap.DMap (HtmlAttribute msg) f)
 
-instance Functor f => Functor (Attributes' f) where
-  fmap f (Attributes m) = Attributes . DMap.fromAscList . fmap (mapAttr f) . DMap.toAscList $ m
+
+instance Functor f => Functor (AttributesF f) where
+  fmap f (AttributesF m) = AttributesF . DMap.fromAscList . fmap (mapAttr f) . DMap.toAscList $ m
     -- note that changing the message type cannot change the ordering of the key types; as
     -- e.g. we cannot change from something like an 'EventAttribute OnPause' attribute to
     -- a GlobalAttribute or so. Hence the ordering does not change
 
--- instance Profunctor Attributes where
+-- mapAttributes' =
 
---   dimap f g = fmap (dimap f g)
-
-
-
-  -- (Attributes m) = Attributes
-
-
-  -- rmap = fmap
+instance Profunctor Attributes where
+  -- f :: (model -> model')
+  -- g :: (msg -> msg')
+  dimap f g (Attributes (AttributesF m)) = Attributes . AttributesF
+                                         . DMap.fromAscList . fmap (mapAttrWith (lmap f) g)
+                                         . DMap.toAscList $ m
 
 type HtmlAttr model msg = DSum (HtmlAttribute msg) (Varying model)
 
 attrsFromList :: [HtmlAttr model msg] -> Attributes model msg
-attrsFromList = Attributes . DMap.fromList
+attrsFromList = Attributes . AttributesF . DMap.fromList
 
 class HasJSFFI a where
 instance HasJSFFI Int
@@ -181,11 +189,11 @@ instance HasJSFFI Bool
 
 
 -- | Traversal over the attributes
-traverseAttributes_                       :: forall model msg t. Applicative t
-                                          => model
-                                          -> (forall a. HtmlAttribute msg a -> a -> t ())
-                                          -> Attributes model msg -> t ()
-traverseAttributes_ input f (Attributes m) = DMap.traverseWithKey_ ff m
+traverseAttributes_               :: forall model msg t. Applicative t
+                                  => model
+                                  -> (forall a. HtmlAttribute msg a -> a -> t ())
+                                  -> Attributes model msg -> t ()
+traverseAttributes_ input f attrs = DMap.traverseWithKey_ ff (coerce attrs)
   where
     ff      :: HtmlAttribute msg a -> Varying model a -> t ()
     ff attr = \case
