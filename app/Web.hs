@@ -53,7 +53,7 @@ main = print "woei"
 
 --------------------------------------------------------------------------------
 
-data HtmlElem = Div | P
+data HtmlElem = Div | P | H1
   deriving (Show,Eq)
 
 -- data Attr msg = OnClick' msg
@@ -63,7 +63,7 @@ data HtmlElem = Div | P
 data HtmlBody f ref msg = TextNode ref (f Text)
                         | ElemNode {-#UNPACK #-}!HtmlElem
                                    ref
-                                   (Attributes' f msg)
+                                   (AttributesF f msg)
                                    (Seq.Seq     (f (HtmlBody f ref msg)))
                       -- deriving stock (Show,Eq,Functor)
 
@@ -86,83 +86,91 @@ newtype View' ref model msg = View { unView :: Varying model (HtmlBody (Varying 
 type View = View' ()
 
 instance Profunctor (View' ref) where
-  dimap f g (View x) = View (dimap f (fmap g) x)
-  rmap = fmap
-
+  dimap                  :: forall model model' msg msg'.
+                            (model' -> model)
+                         -> (msg   -> msg')
+                         -> View' ref model msg -> View' ref model' msg'
+  dimap f g (View vBody) = View $ dimap f dimapHtml vBody
+    where
+      dimapHtml :: HtmlBody (Varying model) ref msg -> HtmlBody (Varying model') ref msg'
+      dimapHtml = \case
+        TextNode ref vt         -> TextNode ref (lmap f vt)
+        ElemNode el ref ats chs -> ElemNode el ref (coerce $ dimap f g $ Attributes ats)
+                                                   (fmap (dimap f dimapHtml) chs)
 
 --------------------------------------------------------------------------------
 
 dynText :: Varying model Text -> View model msg
-dynText = View . TextNode ()
+dynText = View . pure . TextNode ()
 
 textNode :: (model -> Text) -> View model msg
 textNode = dynText . Varying
 
 staticText :: Text -> View model msg
-staticText = View . TextNode mempty . pure
+staticText = View . pure . TextNode mempty . pure
 
 ----------------------------------------
 
+-- | The most generic version of create htmlElement, that allows us to change
+-- which attributes and which children exist over time.
 createHtmlElement              :: HtmlElem
                                -> Varying model (Attributes model msg)
                                -> Varying model (Seq.Seq (View model msg))
                                -> View model msg
-createHtmlElement el mats mchs = View $ ElemNode el mempty <$> mats <*> mchs
+createHtmlElement el mats mchs = View $ ElemNode el mempty <$> coerce mats <*> coerce mchs
 
+-- | More or less the same as createHtmlElement, but in an easier to use form.
+dynHtmlElement            :: HtmlElem
+                          -> Varying model [Attr model msg]
+                          -> Varying model [View model msg]
+                          -> View model msg
+dynHtmlElement el ats chs = createHtmlElement el (attrsFromList <$> ats) (Seq.fromList <$> chs)
 
-  -- do atrs <- mats
-  --                                          chs  <-
-  --                                          pure $ ElemNode el mempty atrs chs
+-- | Create a html element with a fixed set of attributes, and a fixed set of children,
+-- however those attributes/children themselves may vary over time.
+htmlElement            :: HtmlElem -> [Attr model msg] -> [View model msg] -> View model msg
+htmlElement el ats chs = dynHtmlElement el (pure ats) (pure chs)
 
-{-
-
-dynHtmlElment            :: HtmlElem
-                         -> Varying model [Varying model (HtmlAttribute msg)]
-                         -> Varying model [View model msg]
-                         -> View model msg
-dynHtmlElment el ats chs = createHtmlElement el ats (Seq.fromList <$> chs)
-
-htmlElement            :: HtmlElem
-                       -> [Varying model (Attr msg)] -> [View model msg]
-                       -> View model msg
-htmlElement el ats chs = View $
-    ElemNode el mempty <$> sequence ats <*> (Seq.fromList <$> traverse unView chs)
-
-div :: [Varying model (Attr msg)] -> [View model msg] -> View model msg
+div :: [Attr model msg] -> [View model msg] -> View model msg
 div = htmlElement Div
 
-p :: [Varying model (Attr msg)] -> [View model msg] -> View model msg
+p :: [Attr model msg] -> [View model msg] -> View model msg
 p = htmlElement P
 
-  -- $ Memo shouldRecompute renderElem
-  -- where
-  --   renderElem model =
-  --                      $ ElemNode el []
--}
+h1 :: [Attr model msg] -> [View model msg] -> View model msg
+h1 = htmlElement H1
+
+-- | Renders classes
+classes :: Foldable f => f CssClass -> CssClass
+classes = CssClass . Text.unwords . map coerce . F.toList
 
 --------------------------------------------------------------------------------
 
 -- data Attr msg
 
+type Attr model msg = DSum (HtmlAttribute msg) (Varying model)
+
 class CreateStaticAttr attr where
   -- | Create a static attribute
-  (=:) :: attr value     -> value -> DSum (HtmlAttribute msg) Identity
+  (=:) :: attr value     -> value -> Attr model msg
+  -- DSum (HtmlAttribute msg) Identity
 class CreateMessageAttr attr msg where
   -- | Create a message attribute
-  (-:) :: attr value -> value -> DSum (HtmlAttribute msg) Identity
+  (-:) :: attr value -> value -> Attr model msg
+  -- DSum (HtmlAttribute msg) Identity
 
 infixr 1 =:, -:
 
 instance CreateStaticAttr GlobalAttribute where
-  attr =: value = (GlobalAttribute attr) DSum.:=> Identity value
+  attr =: value = (GlobalAttribute attr) DSum.:=> Constant value
 instance CreateStaticAttr AriaAttribute where
-  attr =: value = (AriaAttribute attr) DSum.:=> Identity value
+  attr =: value = (AriaAttribute attr) DSum.:=> Constant value
 
 -- instance CreateStaticAttr (HtmlAttribute msg) where
 --   attr =: value = attr DSum.:=> Identity value
 
 instance CreateMessageAttr (EventAttr msg) msg where
-  attr -: value = (EventAttribute attr) DSum.:=> Identity value
+  attr -: value = (EventAttribute attr) DSum.:=> Constant value
 
 -- instance CreateMessageAttr (HtmlAttribute msg) a where
 --   attr -: value = attr DSum.:=> Identity value
@@ -182,11 +190,6 @@ data MyMsg = HasBeenClicked
            | MyInitialAction
 
 
-{-
-
-
-
-
 myUI :: View MyModel MyMsg
 myUI = div []
            [ h1  [ Class   =: classes ["header", "someclass"]
@@ -197,8 +200,8 @@ myUI = div []
                  ]
            , div [] [p [ OnClick     -: SetMsg "woei"
                        , XData "foo" =: "bar"
-                       , A.Style     =: "border: 1px solid black; width: 200px; height: 100px;"
-                       , OnMouseOver -: SetMsg "hovering"
+                       , Style       =: "border: 1px solid black; width: 200px; height: 100px;"
+                       , OnMouseOver -: \_ -> SetMsg "hovering"
                        ]
                        [ textNode modelText
                        ]
@@ -206,7 +209,7 @@ myUI = div []
            ]
 
 
--}
+
 
 {-
 
