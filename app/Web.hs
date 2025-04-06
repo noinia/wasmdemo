@@ -50,13 +50,66 @@ foreign export javascript "hs_start"
 --------------------------------------------------------------------------------
 
 main :: IO ()
-main = runEff . evalJSIO . evalDOM $ do
-         body <- jsBody
-         let handlerSetup :: Eff [DOM,JSIO,IOE] () -> IO ()
-             handlerSetup = runEff . evalJSIO . evalDOM
-         _    <- runReader myModel $ renderView handlerSetup body myUI
-         pure ()
+main = runEff . runConcurrent . evalJSIO . evalDOM $ runApp myApp
 
+  -- evalJSIO . evalDOM $ do
+  --        body <- jsBody
+  --        let handlerSetup :: Eff [DOM,JSIO,IOE] () -> IO ()
+  --            handlerSetup = runEff . evalJSIO . evalDOM
+  --        _    <- runReader myModel $ renderView handlerSetup body myUI
+  --        pure ()
+
+
+--------------------------------------------------------------------------------
+
+data App es model msg = App { appRenderer   :: View model msg
+                            , appUpdate     :: model -> msg -> Eff es model
+                            , initialAction :: Maybe msg
+                            , initialModel  :: model
+                            }
+
+--------------------------------------------------------------------------------
+
+queueSize = 1024
+
+
+runApp     :: forall appEs es model msg.
+              ( Concurrent :> es
+              , DOM        :> es
+              , Subset appEs es
+              )
+           => App appEs model msg -> Eff es ()
+runApp app = do queue <- atomically $ do q <- newTBQueue queueSize
+                                         for_ (initialAction app) $ writeTBQueue q
+                                         pure q
+                body     <- jsBody
+                startApp queue body
+  where
+    update :: model -> msg -> Eff appEs model
+    update = appUpdate app
+
+    handlerSetup :: Eff [DOM,JSIO,IOE] () -> IO ()
+    handlerSetup = runEff . evalJSIO . evalDOM
+
+    startApp            :: TBQueue msg -> Body -> Eff es ()
+    startApp queue body = do
+          -- creates the initial view
+          theInitialView <- runRender (initialModel app)
+          -- start processing events
+          process (initialModel app) theInitialView
+      where
+        runRender          :: model -> Eff es (View' _ model msg)
+        runRender newModel = runReader newModel $ renderView handlerSetup body (appRenderer app)
+
+        process                          :: model -> View' _ model msg -> Eff es ()
+        process currentModel currentView = do
+            msg <- atomically $ readTBQueue queue
+            newModel <- liftEff $ update currentModel msg
+            newView  <- runRender newModel
+            process newModel newView
+
+        liftEff :: Eff appEs a -> Eff es a
+        liftEff = inject -- for whatever reason ghc doesn't  like it if we inline this.
 
 --------------------------------------------------------------------------------
 
@@ -196,6 +249,16 @@ data MyMsg = HasBeenClicked
            | MyInitialAction
 
 
+-- mySyncUpdate :: MyMsg -> Eff handlerEs ()
+-- mySyncUpdate
+
+myUpdate :: (JSIO :> es) => MyModel -> MyMsg -> Eff es MyModel
+myUpdate model = \case
+  HasBeenClicked  -> model <$ consoleLog "Clicked"
+  SetMsg t        -> pure $ model { modelText = t }
+  MyInitialAction -> model  <$ consoleLog "Started"
+
+
 myUI :: View MyModel MyMsg
 myUI = div []
            [ h1  [ Class   =: classes ["header", "someclass"]
@@ -214,6 +277,17 @@ myUI = div []
                     ]
            ]
 
+
+----------------------------------------
+
+myApp :: App [DOM,JSIO,IOE] MyModel MyMsg
+myApp = App { appRenderer   = myUI
+            , appUpdate     = myUpdate
+            , initialAction = Just MyInitialAction
+            , initialModel  = myModel
+            }
+
+--------------------------------------------------------------------------------
 
 data RenderState model = RenderState { elemRef  :: Maybe Element
                                        -- should this be a HKD so we can guarantee there is
