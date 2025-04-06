@@ -1,10 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE UndecidableInstances #-}
 module EffWeb.Html.Event
   ( EventAttr(..)
   , asEventType
 
   , mapEvent
+  , CanHandleEvent(..)
   ) where
 
 import           Data.Coerce
@@ -25,6 +27,8 @@ import           EffWeb.DOM.FFI.Raw (HasSetAttributeValue(..))
 import           EffWeb.DOM.FFI.Types
 import           EffWeb.Html.Attribute.Common
 import           EffWeb.Html.Element (HtmlElement)
+import           EffWeb.Send
+import           Effectful
 import           GHC.TypeLits
 
 --------------------------------------------------------------------------------
@@ -169,88 +173,6 @@ mapEvent f (evt :=> fval) = case evt of
     OnVolumeChange      -> OnVolumeChange        :=> fmap f fval
     OnWaiting           -> OnWaiting             :=> fmap f fval
 
--- mapEventWith                     :: Functor f
---                                  => (forall v. f v -> g v)
-
---                                  (msg -> msg')
---                                  -> DSum (EventAttr msg) f -> DSum (EventAttr msg') g
--- mapEventWith ff f (evt :=> fval) = case evt of
---     OnAbort             -> OnAbort               :=> fmap f fval
---     OnAutoComplete      -> OnAutoComplete        :=> fmap f fval
---     OnAutoCompleteError -> OnAutoCompleteError   :=> fmap f fval
---     OnBlur              -> OnBlur                :=> fmap f fval
---     OnCancel            -> OnCancel              :=> fmap f fval
---     OnCanplay           -> OnCanplay             :=> fmap f fval
---     OnCanplayThrough    -> OnCanplayThrough      :=> fmap f fval
---     OnChange            -> OnChange              :=> fmap f fval
---     OnClick             -> OnClick               :=> fmap f fval
---     OnClose             -> OnClose               :=> fmap f fval
---     OnContextMenu       -> OnContextMenu         :=> fmap f fval
---     OnCueChange         -> OnCueChange           :=> fmap f fval
---     OnDblClick          -> OnDblClick            :=> fmap f fval
---     OnDrag              -> OnDrag                :=> fmap f fval
---     OnDragEnd           -> OnDragEnd             :=> fmap f fval
---     OnDragEnter         -> OnDragEnter           :=> fmap f fval
---     OnDragLeave         -> OnDragLeave           :=> fmap f fval
---     OnDragOver          -> OnDragOver            :=> fmap f fval
---     OnDragStart         -> OnDragStart           :=> fmap f fval
---     OnDrop              -> OnDrop                :=> fmap f fval
---     OnDurationChange    -> OnDurationChange      :=> fmap f fval
---     OnEmptied           -> OnEmptied             :=> fmap f fval
---     OnEnded             -> OnEnded               :=> fmap f fval
---     OnError             -> OnError               :=> fmap f fval
---     OnFocus             -> OnFocus               :=> fmap f fval
---     OnInput             -> OnInput               :=> fmap f fval
---     OnInvalid           -> OnInvalid             :=> fmap f fval
---     OnKeyDown           -> OnKeyDown             :=> fmap f fval
---     OnKeyPress          -> OnKeyPress            :=> fmap f fval
---     OnKeyUp             -> OnKeyUp               :=> fmap f fval
---     OnLoad              -> OnLoad                :=> fmap f fval
---     OnLoadedData        -> OnLoadedData          :=> fmap f fval
---     OnLoadedMetaData    -> OnLoadedMetaData      :=> fmap f fval
---     OnLoadStart         -> OnLoadStart           :=> fmap f fval
---     OnMouseDown         -> OnMouseDown           :=> fmap (fmap f) fval
---     OnMouseEnter        -> OnMouseEnter          :=> fmap (fmap f) fval
---     OnMouseLeave        -> OnMouseLeave          :=> fmap (fmap f) fval
---     OnMouseMove         -> OnMouseMove           :=> fmap (fmap f) fval
---     OnMouseOut          -> OnMouseOut            :=> fmap (fmap f) fval
---     OnMouseOver         -> OnMouseOver           :=> fmap (fmap f) fval
---     OnMouseUp           -> OnMouseUp             :=> fmap (fmap f) fval
---     OnMouseWheel        -> OnMouseWheel          :=> fmap (fmap f) fval
---     OnPause             -> OnPause               :=> fmap f fval
---     OnPlay              -> OnPlay                :=> fmap f fval
---     OnPlaying           -> OnPlaying             :=> fmap f fval
---     OnProgress          -> OnProgress            :=> fmap f fval
---     OnRateChange        -> OnRateChange          :=> fmap f fval
---     OnReset             -> OnReset               :=> fmap f fval
---     OnResize            -> OnResize              :=> fmap f fval
---     OnScroll            -> OnScroll              :=> fmap f fval
---     OnSeeked            -> OnSeeked              :=> fmap f fval
---     OnSeeking           -> OnSeeking             :=> fmap f fval
---     OnSelect            -> OnSelect              :=> fmap f fval
---     OnShow              -> OnShow                :=> fmap f fval
---     OnSort              -> OnSort                :=> fmap f fval
---     OnStalled           -> OnStalled             :=> fmap f fval
---     OnSubmit            -> OnSubmit              :=> fmap f fval
---     OnSuspend           -> OnSuspend             :=> fmap f fval
---     OnTimeUpdate        -> OnTimeUpdate          :=> fmap f fval
---     OnToggle            -> OnToggle              :=> fmap f fval
---     OnVolumeChange      -> OnVolumeChange        :=> fmap f fval
---     OnWaiting           -> OnWaiting             :=> fmap f fval
-
-
--- mapMessageType :: EventAttr msg a -> EventAttr msg' a
--- mapMessageType = coerce
-
--- mapEvent :: (msg -> msg') -> EventAttr msg a -> EventAttr msg a
-
--- class HasMapEvent a where
---   mapEvent :: (msg -> msg') -> EventAttr msg a -> EventAttr msg'
-
--- mapEvent :: (msg -> msg') -> EventAttr msg msg -> EventAttr msg msg
-
-
-
 instance GEq   (EventAttr msg) where geq = defaultGeq
 instance GCompare  (EventAttr msg) where
   gcompare _ _ = GGT -- FIXME !!
@@ -259,10 +181,11 @@ instance GCompare  (EventAttr msg) where
 -- deriveGCompare ''EventAttr
 
 deriveGShow    ''EventAttr
--- deriveArgDict  ''EventAttr
 
-instance ( forall a. c a
-         ) => Has c (EventAttr msg)  where
+instance ( -- forall a. c msg a
+           c msg msg
+         , c msg (MouseEvent -> msg)
+         ) => Has (c msg) (EventAttr msg)  where
   has a x = case a of
     OnAbort             -> x
     OnAutoComplete      -> x
@@ -397,3 +320,15 @@ asEventType = EventType . \case
   OnToggle            -> "toggle"
   OnVolumeChange      -> "volumechange"
   OnWaiting           -> "waiting"
+
+
+class CanHandleEvent handlerEs msg a where
+  handleEvent :: EventAttr msg a -> a -> Event -> Eff handlerEs ()
+
+instance Send msg :> handlerEs => CanHandleEvent handlerEs msg msg where
+  handleEvent attr msg _ = sendMessage msg
+
+instance Send msg :> handlerEs => CanHandleEvent handlerEs msg (MouseEvent -> msg) where
+  handleEvent attr msg jsEvt = do let x = 0
+                                      y = 0
+                                  sendMessage $ msg (MouseEvent $ MousePosition x y)

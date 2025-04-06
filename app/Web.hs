@@ -29,6 +29,7 @@ import           EffWeb.DOM.FFI.Types
 import           EffWeb.Html.Attribute
 import           EffWeb.Html.Element
 import           EffWeb.JSIO
+import           EffWeb.Send
 import           EffWeb.Varying
 import           Effectful
 import           Effectful.Concurrent.STM
@@ -88,9 +89,6 @@ runApp app = do queue <- atomically $ do q <- newTBQueue queueSize
     update :: model -> msg -> Eff appEs model
     update = appUpdate app
 
-    handlerSetup :: Eff [DOM,JSIO,IOE] () -> IO ()
-    handlerSetup = runEff . evalJSIO . evalDOM
-
     startApp            :: TBQueue msg -> Body -> Eff es ()
     startApp queue body = do
           -- creates the initial view
@@ -110,6 +108,10 @@ runApp app = do queue <- atomically $ do q <- newTBQueue queueSize
 
         liftEff :: Eff appEs a -> Eff es a
         liftEff = inject -- for whatever reason ghc doesn't  like it if we inline this.
+
+        handlerSetup :: Eff [Send msg,Concurrent,DOM,JSIO,IOE] () -> IO ()
+        handlerSetup = runEff . evalJSIO . evalDOM . runConcurrent . runSendWith queue
+
 
 --------------------------------------------------------------------------------
 
@@ -330,7 +332,9 @@ renderView                     :: forall root ref es model msg handlerEs.
                                   ( IsNode root
                                   , DOM :> es
                                   , Reader model :> es
-                           , JSIO :> handlerEs
+
+                                  , Send msg :> handlerEs
+                                  , DOM      :> handlerEs
                                   )
                                => (Eff handlerEs () -> IO ())
                                -- ^ the environment in which we evaluate a event handler
@@ -357,7 +361,9 @@ createHtmlVarying       :: forall handlerEs es root model msg.
                            , DOM                     :> es
                            , Reader model            :> es
                            , CanRunHandler handlerEs :> es
-                           , JSIO :> handlerEs
+
+                           , Send msg :> handlerEs
+                           , DOM      :> handlerEs
                            )
                          => root
                          -> Varying model (HtmlBody (Varying model) (RenderState model) msg)
@@ -370,7 +376,9 @@ createHtml'             :: forall handlerEs root model msg es.
                            , DOM                     :> es
                            , Reader        model     :> es
                            , CanRunHandler handlerEs :> es
-                           , JSIO :> handlerEs
+
+                           , Send msg :> handlerEs
+                           , DOM      :> handlerEs
                            )
                         => root
                         -> HtmlBody (Varying model) (RenderState model) msg
@@ -386,7 +394,7 @@ createHtml' parent body = case body of
                                                }
                                            ) vText
       Update textRef -> do (text, mModel) <- acquire vText
-                           -- TODO: set the text
+                           setTextContent textRef text
                            pure $ TextNode (rs { oldModel = mModel} ) vText
     ElemNode el rs attrs chs -> case elemRef rs of
       Nothing       -> do elRef <- createElement (elementNameOf el)
@@ -411,11 +419,16 @@ createHtml' parent body = case body of
     setAttribute' elRef attr value = case attr of
       GlobalAttribute attr'    -> has @HasSetAttributeValue attr' setAttribute elRef attr value
       AriaAttribute attr'      -> has @HasSetAttributeValue attr' setAttribute elRef attr value
-      EventAttribute eventAttr -> addEventListener elRef eventAttr (asHandler eventAttr value)
+      EventAttribute eventAttr -> has @(CanHandleEvent handlerEs msg) eventAttr $
+                                  addEventListener @handlerEs
+                                                   elRef eventAttr (handleEvent eventAttr value)
 
-    asHandler              :: EventAttr msg a -> _ -> Event -> Eff handlerEs ()
-    asHandler _ _ rawEvent = consoleLog "fired"
-      --
+    -- asHandler                    :: EventAttr msg msg'
+    --                              -> msg'
+    --                              -> Event
+    --                              -> Eff handlerEs ()
+    -- asHandler _ msgLike rawEvent = consoleLog "fired"
+    --   --
 
       -- do
       --     (value, _) <- acquire vValue

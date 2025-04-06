@@ -35,8 +35,10 @@ foreign import javascript unsafe "document.createTextNode($1)"
 foreign import javascript unsafe "document.createElement($1)"
   js_createElement :: JSString -> IO Element
 
+--------------------------------------------------------------------------------
 
-
+foreign import javascript unsafe "str => {$1.textContent = str}"
+  js_set_text_content :: Node -> JSString -> IO ()
 
 --------------------------------------------------------------------------------
 -- * Adding or Removing Elements

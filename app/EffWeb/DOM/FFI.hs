@@ -43,6 +43,10 @@ getParent = unsafeEff_ . coerce . js_getParent . asNode
 createTextNode :: DOM :> es => Text -> Eff es Node
 createTextNode = unsafeEff_ . js_createTextNode . textToJSString
 
+setTextContent :: (DOM :> es, IsNode node) => node -> Text -> Eff es ()
+setTextContent node content = unsafeEff_
+                            $ js_set_text_content (asNode node) (textToJSString content)
+
 --------------------------------------------------------------------------------
 -- * Elements
 

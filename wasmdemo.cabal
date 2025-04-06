@@ -93,7 +93,7 @@ executable wasmdemo-web
 
        EffWeb.Varying
 
-       -- EffWeb.Send
+       EffWeb.Send
 
 
         -- Attributes
