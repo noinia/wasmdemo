@@ -52,7 +52,9 @@ foreign export javascript "hs_start"
 main :: IO ()
 main = runEff . evalJSIO . evalDOM $ do
          body <- jsBody
-         _    <- runReader myModel $ renderView body myUI
+         let handlerSetup :: Eff [DOM,JSIO,IOE] () -> IO ()
+             handlerSetup = runEff . evalJSIO . evalDOM
+         _    <- runReader myModel $ renderView handlerSetup body myUI
          pure ()
 
 
@@ -218,8 +220,13 @@ data RenderState model = RenderState { elemRef  :: Maybe Element
                                        -- an elem?
                                      , oldModel :: Maybe model
                                      -- ^ model used at the time of construction (if relevant)
+
+                                     -- I'm not quite sure that this is a good idea yet,
+                                     -- as it retains old models. Moreover, all elements
+                                     -- could retain some other model; so that seems expensive.
                                      }
 
+-- | Initial rendering state
 initialState :: RenderState model
 initialState = RenderState Nothing Nothing
 
@@ -227,7 +234,7 @@ initialState = RenderState Nothing Nothing
 
 data ShouldRender = NoUpdate | Create | Update Element
 
--- | Test whether we should (re)render the
+-- | Test whether we should (re)render the part of the tree
 shouldRender     :: RenderState model -> Varying model' a -> ShouldRender
 shouldRender rs v = case elemRef rs of
                       Nothing  -> Create
@@ -243,43 +250,53 @@ acquire = \case
   Constant x -> pure (x, Nothing)
   Varying f  -> (\model -> (f model, Just model)) <$> ask
 
+
+-- | Renders a view
+renderView                     :: forall root ref es model msg handlerEs.
+                                  ( IsNode root
+                                  , DOM :> es
+                                  , Reader model :> es
+                           , JSIO :> handlerEs
+                                  )
+                               => (Eff handlerEs () -> IO ())
+                               -- ^ the environment in which we evaluate a event handler
+                               -> root -> View' ref model msg
+                               -> Eff es (View' (RenderState model) model msg)
+renderView handlerSetup root v = let View var = mapRef (const initialState) v in
+    View <$> runCanRunHandler handlerSetup (createHtmlVarying @handlerEs root var)
+
+
+-- | Helper to create a varying
 createVaryingWith   :: (Reader model :> es)
-                    => (a -> Eff es b)
-                    -> Varying model a -> Eff es (Varying model b)
+                    => (a -> Eff es a)
+                    -> Varying model a -> Eff es (Varying model a)
 createVaryingWith f = \case
   Constant x -> Constant <$> f x
   Varying g  -> do x   <- asks g
                    res <- f x
-                   pure $ Varying $ \input -> res
-                   -- not sure if this is correct now
+                   pure $ Varying g
+  -- hmm, this throws away the result; that also doesn't sound right
 
-
-createHtmlVarying       :: ( IsNode root
-                           , DOM :> es
-                           , Reader model :> es
+-- | Create a html subtree that may vary depending on the model
+createHtmlVarying       :: forall handlerEs es root model msg.
+                           ( IsNode root
+                           , DOM                     :> es
+                           , Reader model            :> es
+                           , CanRunHandler handlerEs :> es
+                           , JSIO :> handlerEs
                            )
-                        => root
-                        -> Varying model (HtmlBody (Varying model) (RenderState model) msg)
-                        -> Eff es (Varying model (HtmlBody (Varying model) (RenderState model) msg))
-createHtmlVarying parent = createVaryingWith (createHtml' parent)
-
-
-
--- | Renders a view
-renderView        :: ( IsNode root
-                     , DOM :> es
-                     , Reader model :> es
-                     )
-                  => root -> View' ref model msg -> Eff es (View' (RenderState model) model msg)
-renderView root v = let View var = mapRef (const initialState) v
-                    in View <$> createHtmlVarying root var
-
+                         => root
+                         -> Varying model (HtmlBody (Varying model) (RenderState model) msg)
+                         -> Eff es (Varying model (HtmlBody (Varying model) (RenderState model) msg))
+createHtmlVarying parent = createVaryingWith (createHtml' @handlerEs parent)
 
 -- | Creates the html tree
-createHtml'             :: forall root model msg es.
+createHtml'             :: forall handlerEs root model msg es.
                            ( IsNode root
-                           , DOM :> es
-                           , Reader model :> es
+                           , DOM                     :> es
+                           , Reader        model     :> es
+                           , CanRunHandler handlerEs :> es
+                           , JSIO :> handlerEs
                            )
                         => root
                         -> HtmlBody (Varying model) (RenderState model) msg
@@ -304,7 +321,7 @@ createHtml' parent body = case body of
 
                           model <- ask -- TODO fix
                           traverseAttributes_ model (setAttribute' elRef) (Attributes attrs)
-                          chs'      <- traverse (createHtmlVarying elRef) chs
+                          chs'      <- traverse (createHtmlVarying @handlerEs elRef) chs
                             -- TODO: maintain whether we access the model or not
                           let mModel = Just model
                             -- First mModel = attrModel -- <> chsModel
@@ -317,8 +334,14 @@ createHtml' parent body = case body of
   where
     setAttribute'                   :: Element -> HtmlAttribute msg v -> v
                                     -> Eff es ()
-    setAttribute' elRef attr value = pure ()
-      -- has @HasSetAttributeValue attr setAttribute elRef attr value
+    setAttribute' elRef attr value = case attr of
+      GlobalAttribute attr'    -> has @HasSetAttributeValue attr' setAttribute elRef attr value
+      AriaAttribute attr'      -> has @HasSetAttributeValue attr' setAttribute elRef attr value
+      EventAttribute eventAttr -> addEventListener elRef eventAttr (asHandler eventAttr value)
+
+    asHandler              :: EventAttr msg a -> _ -> Event -> Eff handlerEs ()
+    asHandler _ _ rawEvent = consoleLog "fired"
+      --
 
       -- do
       --     (value, _) <- acquire vValue

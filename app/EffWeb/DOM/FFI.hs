@@ -87,11 +87,26 @@ consoleLog = unsafeEff_  . js_log . textToJSString
 --------------------------------------------------------------------------------
 -- * Events
 
+-- | CanRunHandler is essentially a reader effect that stores the handler
+data CanRunHandler (handlerEs :: [Effect]) :: Effect
+
+type instance DispatchOf (CanRunHandler handlerEs) = Static NoSideEffects
+newtype instance StaticRep (CanRunHandler handlerEs) =
+  HandlerSetup (EventHandlerRunner handlerEs)
+
+getHandlerSetup :: CanRunHandler handlerEs :> es => Eff es (EventHandlerRunner handlerEs)
+getHandlerSetup = do HandlerSetup handlerSetup <- getStaticRep
+                     pure handlerSetup
+
+runCanRunHandler              :: EventHandlerRunner handlerEs
+                              -> Eff (CanRunHandler handlerEs : es) a -> Eff es a
+runCanRunHandler handlerSetup = evalStaticRep (HandlerSetup handlerSetup)
+
+--------------------------------------------------------------------------------
+
 -- | Type that explains how to actually run an EventHandler in IO
 type EventHandlerRunner handlerEs = Eff handlerEs () -> IO ()
 
--- | Shorthand
-type CanRunHandler handlerEs = Reader (EventHandlerRunner handlerEs)
 
 -- | Add an Event Listener.
 addEventListener                           :: forall handlerEs es eventTarget msg a.
@@ -106,7 +121,7 @@ addEventListener                           :: forall handlerEs es eventTarget ms
 addEventListener target eventType listener = do
     -- get the eventHandlerRunner; i.e. the thing that we use to run the Eff hanlder () in the
     -- IO monad.
-    runListener <- ask @(Eff handlerEs () -> IO ())
+    (runListener :: Eff handlerEs () -> IO ()) <- getHandlerSetup
     let jsListener :: JSVal -> IO ()
         jsListener = runListener . listener . Event
     unsafeEff_  $ do
