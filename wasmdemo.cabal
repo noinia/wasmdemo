@@ -77,6 +77,7 @@ executable wasmdemo-web
     ghc-options: -no-hs-main -optl-mexec-model=reactor -optl-Wl,--export=hs_start
 
     other-modules:
+       EffWeb.Attr
        EffWeb.Html.Event
        EffWeb.Html.Element
        EffWeb.Html.Attribute

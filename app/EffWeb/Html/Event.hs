@@ -7,6 +7,9 @@ module EffWeb.Html.Event
 
   , mapEvent
   , CanHandleEvent(..)
+
+  , MouseEvent(..)
+  , MousePosition(..)
   ) where
 
 import           Data.Coerce

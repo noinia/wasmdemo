@@ -22,6 +22,7 @@ import           Data.String (IsString(..))
 import           Data.Text (Text)
 import qualified Data.Text as Text
 import           Data.Traversable
+import           EffWeb.Attr
 import           EffWeb.DOM.Effect
 import           EffWeb.DOM.FFI
 import           EffWeb.DOM.FFI.Raw (HasSetAttributeValue(..))
@@ -200,41 +201,6 @@ p = htmlElement P
 
 h1 :: [Attr model msg] -> [View model msg] -> View model msg
 h1 = htmlElement H1
-
--- | Renders classes
-classes :: Foldable f => f CssClass -> CssClass
-classes = CssClass . Text.unwords . map coerce . F.toList
-
---------------------------------------------------------------------------------
-
--- data Attr msg
-
-type Attr model msg = DSum (HtmlAttribute msg) (Varying model)
-
-class CreateStaticAttr attr where
-  -- | Create a static attribute
-  (=:) :: attr value     -> value -> Attr model msg
-  -- DSum (HtmlAttribute msg) Identity
-class CreateMessageAttr attr msg where
-  -- | Create a message attribute
-  (-:) :: attr value -> value -> Attr model msg
-  -- DSum (HtmlAttribute msg) Identity
-
-infixr 1 =:, -:
-
-instance CreateStaticAttr GlobalAttribute where
-  attr =: value = (GlobalAttribute attr) DSum.:=> Constant value
-instance CreateStaticAttr AriaAttribute where
-  attr =: value = (AriaAttribute attr) DSum.:=> Constant value
-
--- instance CreateStaticAttr (HtmlAttribute msg) where
---   attr =: value = attr DSum.:=> Identity value
-
-instance CreateMessageAttr (EventAttr msg) msg where
-  attr -: value = (EventAttribute attr) DSum.:=> Constant value
-
--- instance CreateMessageAttr (HtmlAttribute msg) a where
---   attr -: value = attr DSum.:=> Identity value
 
 --------------------------------------------------------------------------------
 
